@@ -40,22 +40,22 @@ def install_dependencies():
     for dep in all_dependencies:
         if dep == 'nsis':
             if CURRENT_OS == 'windows':
-                print("⚠️  NSIS installer needs to be downloaded separately from:")
+                print("[WARNING] NSIS installer needs to be downloaded separately from:")
                 print("   https://nsis.sourceforge.io/Download")
             else:
-                print(f"⚠️  NSIS not needed on {CURRENT_OS}")
+                print(f"[WARNING] NSIS not needed on {CURRENT_OS}")
         elif dep == 'appimagetool':
             if CURRENT_OS == 'linux':
-                print("⚠️  AppImageTool needs to be downloaded separately from:")
+                print("[WARNING] AppImageTool needs to be downloaded separately from:")
                 print("   https://github.com/AppImage/AppImageKit/releases")
             else:
-                print(f"⚠️  AppImageTool not needed on {CURRENT_OS}")
+                print(f"[WARNING] AppImageTool not needed on {CURRENT_OS}")
         else:
             run_command(f"pip install {dep}")
 
 def create_app_bundle():
     """Create the application bundle using PyInstaller"""
-    print(f"🔨 Creating {CURRENT_OS} app bundle with PyInstaller...")
+    print(f"[BUILD] Creating {CURRENT_OS} app bundle with PyInstaller...")
     
     # Clean previous builds
     if os.path.exists('dist'):
@@ -96,7 +96,7 @@ def create_app_bundle():
 
 def create_windows_installer():
     """Create Windows NSIS installer"""
-    print("💿 Creating Windows NSIS installer...")
+    print("[BUILD] Creating Windows NSIS installer...")
     
     # Create NSIS script
     nsis_script = f'''
@@ -245,7 +245,7 @@ def create_installer():
 
 def create_dmg_installer():
     """Create macOS DMG installer"""
-    print("💿 Creating DMG installer...")
+    print("[BUILD] Creating DMG installer...")
     
     # Create DMG settings file
     dmg_settings = f'''
@@ -324,10 +324,10 @@ def main():
         
         print("\\n" + "=" * 50)
         print("[SUCCESS] Build completed successfully!")
-        print(f"📁 Check the project directory for your {CURRENT_OS} installer files")
+        print(f"[INFO] Check the project directory for your {CURRENT_OS} installer files")
         
         if CURRENT_OS == 'windows':
-            print("\\n📝 For Windows builds:")
+            print("\\n[INFO] For Windows builds:")
             print("   - Install NSIS for professional installers")
             print("   - Add .ico icon file for better appearance")
         
