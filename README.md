@@ -1,6 +1,6 @@
 # 📁 Image Folder Analyzer
 
-A modern PyQt5 desktop application for analyzing and viewing images in folders with professional cross-platform build support.
+A modern PyQt5 desktop application for analyzing OMR sheets folders with professional cross-platform build support.
 
 ## ✨ Features
 
