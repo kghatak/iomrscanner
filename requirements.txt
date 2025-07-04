@@ -1,0 +1,8 @@
+PyQt5>=5.15.0
+Pillow>=9.0.0
+pyinstaller>=5.0.0
+
+# Platform-specific build tools (install as needed)
+dmgbuild>=1.6.0; sys_platform == "darwin"
+# NSIS for Windows (manual install): https://nsis.sourceforge.io/
+# AppImageTool for Linux (manual install): https://github.com/AppImage/AppImageKit/releases

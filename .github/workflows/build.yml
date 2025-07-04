@@ -1,0 +1,138 @@
+name: Build Cross-Platform
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  # Configure retention settings
+  ARTIFACT_RETENTION_DAYS: 30
+  MAX_RELEASES_TO_KEEP: 5
+
+jobs:
+  # Clean up old releases first
+  cleanup:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+    - name: Delete old releases
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const maxReleases = parseInt(process.env.MAX_RELEASES_TO_KEEP);
+          const { data: releases } = await github.rest.repos.listReleases({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            per_page: 100
+          });
+          
+          // Filter out drafts and prereleases, sort by creation date
+          const stableReleases = releases
+            .filter(release => !release.draft && !release.prerelease)
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          
+          if (stableReleases.length > maxReleases) {
+            const releasesToDelete = stableReleases.slice(maxReleases);
+            
+            for (const release of releasesToDelete) {
+              console.log(`Deleting old release: ${release.tag_name}`);
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id
+              });
+              
+              // Also delete the git tag
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${release.tag_name}`
+                });
+              } catch (error) {
+                console.log(`Could not delete tag ${release.tag_name}: ${error.message}`);
+              }
+            }
+          }
+
+  build:
+    needs: [cleanup]
+    if: always() && (needs.cleanup.result == 'success' || needs.cleanup.result == 'skipped')
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            artifact: "*.exe"
+          - os: macos-latest
+            platform: macos
+            artifact: "*.dmg"
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+    
+    - name: Install NSIS (Windows only)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install nsis
+    
+    - name: Build application
+      run: |
+        python build_cross_platform.py
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.platform }}-build
+        path: |
+          ${{ matrix.artifact }}
+          dist/
+        retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+        
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Image Folder Analyzer ${{ github.ref_name }}
+        body: |
+          ## 🚀 Image Folder Analyzer ${{ github.ref_name }}
+          
+          ### 📥 Downloads:
+          - **Windows**: `*_Setup.exe` - Full installer with shortcuts
+          - **macOS**: `*.dmg` - Drag to Applications folder  
+          
+          ### ✨ Features:
+          - Analyze image folders with detailed statistics
+          - Preview images with EXIF data
+          - Automatic slideshow scanning
+          - Export analysis results
+          
+          ### 🛠️ System Requirements:
+          - **Windows**: Windows 10 or later
+          - **macOS**: macOS 10.14 or later  
+          
+          ---
+          
+          **Note**: Only the latest ${{ env.MAX_RELEASES_TO_KEEP }} releases are kept to manage storage.
+          
+        files: |
+          *.exe
+          *.dmg
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
