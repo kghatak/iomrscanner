@@ -78,6 +78,9 @@ def create_app_bundle():
     icon_path = CURRENT_PLATFORM['icon']
     if os.path.exists(icon_path):
         cmd_parts.append(f'--icon={icon_path}')
+    else:
+        print(f"[WARNING] Icon file not found: {icon_path}")
+        print("[INFO] Continuing build without custom icon")
     
     # Platform-specific options
     if CURRENT_OS == 'windows':
@@ -98,6 +101,15 @@ def create_windows_installer():
     """Create Windows NSIS installer"""
     print("[BUILD] Creating Windows NSIS installer...")
     
+    # Check if icon exists
+    icon_line = ""
+    icon_path = NSIS_CONFIG['icon']
+    if os.path.exists(icon_path):
+        icon_line = f'!define MUI_ICON "{icon_path}"'
+    else:
+        print(f"[WARNING] Icon file not found: {icon_path}")
+        print("[INFO] Creating installer without custom icon")
+    
     # Create NSIS script
     nsis_script = f'''
 !include "MUI2.nsh"
@@ -108,7 +120,7 @@ InstallDir "{NSIS_CONFIG['install_dir']}"
 RequestExecutionLevel admin
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "{NSIS_CONFIG['icon']}"
+{icon_line}
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
