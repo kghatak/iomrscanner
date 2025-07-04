@@ -16,6 +16,8 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
     steps:
     - name: Delete old releases
       uses: actions/github-script@v6
@@ -60,6 +62,8 @@ jobs:
   build:
     needs: [cleanup]
     if: always() && (needs.cleanup.result == 'success' || needs.cleanup.result == 'skipped')
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -84,6 +88,11 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
+        
+    - name: Install macOS-specific dependencies
+      if: matrix.os == 'macos-latest'
+      run: |
+        pip install dmgbuild ds_store mac_alias
     
     - name: Install NSIS (Windows only)
       if: matrix.os == 'windows-latest'
@@ -102,9 +111,31 @@ jobs:
           ${{ matrix.artifact }}
           dist/
         retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+
+  # Create release after all builds complete
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        merge-multiple: true
+        
+    - name: List downloaded files
+      run: |
+        echo "Files in current directory:"
+        ls -la
+        echo "Looking for executable files:"
+        find . -name "*.exe" -o -name "*.dmg" -o -name "*.zip" | head -10
         
     - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         name: Image Folder Analyzer ${{ github.ref_name }}
@@ -130,8 +161,9 @@ jobs:
           **Note**: Only the latest ${{ env.MAX_RELEASES_TO_KEEP }} releases are kept to manage storage.
           
         files: |
-          *.exe
-          *.dmg
+          **/*.exe
+          **/*.dmg
+          **/*.zip
         draft: false
         prerelease: false
       env:
