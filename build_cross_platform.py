@@ -21,16 +21,16 @@ def run_command(cmd, cwd=None):
     try:
         result = subprocess.run(cmd, shell=True, cwd=cwd, check=True, 
                               capture_output=True, text=True)
-        print(f"✅ Success: {cmd}")
+        print(f"[SUCCESS] {cmd}")
         return result
     except subprocess.CalledProcessError as e:
-        print(f"❌ Error running: {cmd}")
+        print(f"[ERROR] Error running: {cmd}")
         print(f"Error output: {e.stderr}")
         sys.exit(1)
 
 def install_dependencies():
     """Install required build dependencies for current platform"""
-    print(f"📦 Installing build dependencies for {CURRENT_OS}...")
+    print(f"[INSTALL] Installing build dependencies for {CURRENT_OS}...")
     
     base_dependencies = ['pyinstaller']
     platform_dependencies = CURRENT_PLATFORM['build_tools']
@@ -92,7 +92,7 @@ def create_app_bundle():
     run_command(cmd)
     
     app_name = f"{APP_NAME}{CURRENT_PLATFORM['file_extension']}"
-    print(f"✅ App bundle created: dist/{app_name}")
+    print(f"[SUCCESS] App bundle created: dist/{app_name}")
 
 def create_windows_installer():
     """Create Windows NSIS installer"""
@@ -156,9 +156,9 @@ SectionEnd
     # Run NSIS compiler
     try:
         run_command('makensis installer.nsi')
-        print(f"✅ Windows installer created: {APP_NAME.replace(' ', '_')}_v{APP_VERSION}_Setup.exe")
+        print(f"[SUCCESS] Windows installer created: {APP_NAME.replace(' ', '_')}_v{APP_VERSION}_Setup.exe")
     except:
-        print("❌ NSIS not found. Please install NSIS from https://nsis.sourceforge.io/")
+        print("[ERROR] NSIS not found. Please install NSIS from https://nsis.sourceforge.io/")
         create_simple_zip_installer()
     
     # Clean up
@@ -167,7 +167,7 @@ SectionEnd
 
 def create_simple_zip_installer():
     """Create a simple ZIP installer as fallback"""
-    print("📦 Creating ZIP installer...")
+    print("[BUILD] Creating ZIP installer...")
     
     zip_name = f"{APP_NAME.replace(' ', '_')}_v{APP_VERSION}_{CURRENT_OS}.zip"
     
@@ -230,7 +230,7 @@ Created with PyQt5 and PyInstaller
     # Clean up
     shutil.rmtree(installer_dir)
     
-    print(f"✅ ZIP installer created: {zip_name}")
+    print(f"[SUCCESS] ZIP installer created: {zip_name}")
 
 def create_installer():
     """Create installer for current platform"""
@@ -287,9 +287,9 @@ icon_size = 128
     dmg_name = f"{APP_NAME.replace(' ', '_')}_v{APP_VERSION}.dmg"
     try:
         run_command(f'dmgbuild -s dmg_settings.py "{APP_NAME}" "{dmg_name}"')
-        print(f"✅ DMG created: {dmg_name}")
+        print(f"[SUCCESS] DMG created: {dmg_name}")
     except:
-        print("❌ dmgbuild not found or failed. Creating ZIP installer instead...")
+        print("[ERROR] dmgbuild not found or failed. Creating ZIP installer instead...")
         create_simple_zip_installer()
     
     # Clean up
@@ -298,18 +298,18 @@ icon_size = 128
 
 def create_appimage():
     """Create Linux AppImage (placeholder)"""
-    print("📦 Linux AppImage creation not implemented yet")
+    print("[BUILD] Linux AppImage creation not implemented yet")
     print("Creating ZIP installer instead...")
     create_simple_zip_installer()
 
 def main():
     """Main build process"""
-    print(f"🚀 Building {APP_NAME} v{APP_VERSION} for {CURRENT_OS}")
+    print(f"[BUILD] Building {APP_NAME} v{APP_VERSION} for {CURRENT_OS}")
     print("=" * 50)
     
     # Check if we're in the right directory
     if not os.path.exists('main.py'):
-        print("❌ Error: main.py not found. Please run this script from the project root.")
+        print("[ERROR] Error: main.py not found. Please run this script from the project root.")
         sys.exit(1)
     
     try:
@@ -323,7 +323,7 @@ def main():
         create_installer()
         
         print("\\n" + "=" * 50)
-        print("🎉 Build completed successfully!")
+        print("[SUCCESS] Build completed successfully!")
         print(f"📁 Check the project directory for your {CURRENT_OS} installer files")
         
         if CURRENT_OS == 'windows':
@@ -332,10 +332,10 @@ def main():
             print("   - Add .ico icon file for better appearance")
         
     except KeyboardInterrupt:
-        print("\\n❌ Build cancelled by user")
+        print("\\n[CANCELLED] Build cancelled by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\\n❌ Build failed: {e}")
+        print(f"\\n[ERROR] Build failed: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
