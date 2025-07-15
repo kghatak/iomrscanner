@@ -204,3 +204,59 @@ class ImagePanel(QWidget):
     def refresh_images(self):
         if self.current_folder:
             self.load_images()
+
+    def create_qr_code(self):
+        try:
+            import qrcode
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+            from PyQt5.QtGui import QPixmap, QImage
+            import socket
+        except ImportError:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Missing Dependency", "Please install qrcode: pip install qrcode[pil]")
+            return
+
+        # Get local IP address
+        def get_local_ip():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(0)
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                s.close()
+                return ip
+            except Exception:
+                return "127.0.0.1"
+
+        ip = get_local_ip()
+        port = 5023  # Change if your server uses a different port
+        url = f"http://{ip}:{port}/connect"
+
+        # Generate QR code
+        qr = qrcode.QRCode(box_size=8, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        # Convert PIL image to QPixmap
+        img = img.convert("RGB")
+        data = img.tobytes("raw", "RGB")
+        qimg = QImage(data, img.size[0], img.size[1], QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimg)
+
+        # Show dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("QR Code for HTTP Server Connect")
+        layout = QVBoxLayout(dialog)
+        label = QLabel(f"Scan this QR code to connect:\n{url}")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        qr_label = QLabel()
+        qr_label.setPixmap(pixmap)
+        qr_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(qr_label)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        dialog.setLayout(layout)
+        dialog.exec_()

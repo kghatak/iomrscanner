@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# pdf extensions
+*.pdf
+*.pdfa
+
 # Distribution / packaging
 .Python
 build/
@@ -26,6 +30,13 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+test_images/
+test_output/
+test_input_pdf/
+BU_test_input_pdf copy/
+aruco_imgs/
+pdf_pages/
+test_pdfs/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -110,6 +121,7 @@ ENV/
 env.bak/
 venv.bak/
 qt_env/
+qt_env1/
 
 # Spyder project settings
 .spyderproject

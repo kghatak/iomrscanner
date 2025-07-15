@@ -1,12 +1,170 @@
 import os
+import shutil
+import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, 
-    QFrame, QGridLayout, QTextEdit, QTabWidget, QPushButton
+    QFrame, QGridLayout, QTextEdit, QTabWidget, QPushButton,
+    QProgressBar, QMessageBox, QFileDialog, QCheckBox, QSpinBox,
+    QGroupBox, QFormLayout, QTableWidget, QTableWidgetItem
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from PIL import Image
 from PIL.ExifTags import TAGS
+
+try:
+    from image_processor import ImageProcessor, ALL_DEPENDENCIES_AVAILABLE
+    OPENCV_AVAILABLE = ALL_DEPENDENCIES_AVAILABLE
+except ImportError as e:
+    ALL_DEPENDENCIES_AVAILABLE = False
+    OPENCV_AVAILABLE = False
+    print(f"Warning: ImageProcessor not available - {e}")
+
+
+class ArUcoProcessingWorker(QThread):
+    """Worker thread for processing images with ArUco marker detection and OCR"""
+    progress_updated = pyqtSignal(int, str)  # progress, current_file
+    processing_finished = pyqtSignal(dict)  # results dictionary
+    file_processed = pyqtSignal(dict)  # individual file result
+    status_message = pyqtSignal(str)  # detailed status messages for logging
+    
+    def __init__(self, source_folder, output_folder, expected_markers):
+        super().__init__()
+        self.source_folder = source_folder
+        self.output_folder = output_folder
+        self.expected_markers = expected_markers
+        self.is_cancelled = False
+        self.processor = ImageProcessor() if ALL_DEPENDENCIES_AVAILABLE else None
+        
+    def cancel_processing(self):
+        self.is_cancelled = True
+        
+    def run(self):
+        """Main ArUco processing loop"""
+        try:
+            self.status_message.emit("🔄 Initializing ArUco processing...")
+            
+            if not ALL_DEPENDENCIES_AVAILABLE:
+                self.status_message.emit("❌ ERROR: Required dependencies not available")
+                error_msg = "Missing dependencies. "
+                if not OPENCV_AVAILABLE:
+                    error_msg += "Please install: pip install opencv-python pytesseract numpy"
+                self.processing_finished.emit({
+                    'total': 0, 'success': 0, 'failure': 0,
+                    'message': error_msg
+                })
+                return
+            
+            self.status_message.emit("✅ All dependencies loaded successfully")
+            
+            # Set expected markers
+            self.status_message.emit(f"🎯 Setting expected ArUco markers: {self.expected_markers}")
+            self.processor.set_expected_markers(self.expected_markers)
+            
+            # Create output directories
+            self.status_message.emit("📁 Creating output directories...")
+            results_folder = os.path.join(self.output_folder, "results")
+            os.makedirs(results_folder, exist_ok=True)
+            self.status_message.emit(f"📁 Results folder: {results_folder}")
+            # Create success and failure folders
+            success_folder = os.path.join(results_folder, "success")
+            failure_folder = os.path.join(results_folder, "failure")
+            os.makedirs(success_folder, exist_ok=True)
+            os.makedirs(failure_folder, exist_ok=True)
+            self.status_message.emit(f"📁 Success folder: {success_folder}")
+            self.status_message.emit(f"📁 Failure folder: {failure_folder}")
+            
+            # Get all image files
+            self.status_message.emit("🔍 Scanning for image files...")
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+            image_files = []
+            
+            for root, dirs, files in os.walk(self.source_folder):
+                for file in files:
+                    if os.path.splitext(file.lower())[1] in image_extensions:
+                        image_files.append(os.path.join(root, file))
+            
+            total_files = len(image_files)
+            self.status_message.emit(f"📊 Found {total_files} image files to process")
+            
+            if total_files == 0:
+                self.status_message.emit("⚠️ No image files found in the selected folder")
+                self.processing_finished.emit({
+                    'total': 0, 'success': 0, 'failure': 0,
+                    'message': 'No image files found in the selected folder.'
+                })
+                return
+            
+            success_count = 0
+            failure_count = 0
+            processed_files = []
+            
+            self.status_message.emit("🚀 Starting batch processing...")
+            
+            # Process each image
+            for i, image_path in enumerate(image_files):
+                if self.is_cancelled:
+                    self.status_message.emit("🛑 Processing cancelled by user")
+                    break
+                
+                filename = os.path.basename(image_path)
+                current_progress = int((i / total_files) * 100)
+                
+                self.status_message.emit(f"📷 [{i+1}/{total_files}] Processing: {filename}")
+                self.progress_updated.emit(current_progress, f"Processing: {filename}")
+                
+                # Process image with ArUco detection and OCR
+                self.status_message.emit(f"🔍 Detecting ArUco markers in {filename}...")
+                result = self.processor.process_image(image_path, self.output_folder)
+                
+                # Log detection results
+                detection_info = result['detection_info']
+                detected_ids = detection_info.get('detected_ids', [])
+                missing_ids = detection_info.get('missing_ids', [])
+                
+                if result['success']:
+                    success_count += 1
+                    self.status_message.emit(f"✅ {filename}: All markers found - {detected_ids}")
+                else:
+                    failure_count += 1
+                    self.status_message.emit(f"❌ {filename}: Missing markers - {missing_ids}")
+                
+                # Log OCR results if available
+                extracted_text = result.get('extracted_text', '')
+                if extracted_text and extracted_text != "OCR Error: ":
+                    text_preview = extracted_text[:50] + "..." if len(extracted_text) > 50 else extracted_text
+                    self.status_message.emit(f"📝 {filename}: OCR extracted text - '{text_preview}'")
+                
+                # Log file operations
+                if result.get('annotation_created', False):
+                    self.status_message.emit(f"🖼️ {filename}: Annotated image created")
+                
+                processed_files.append(result)
+                self.file_processed.emit(result)
+            
+            # Final results
+            self.status_message.emit("📊 Processing completed! Generating final report...")
+            results = {
+                'total': total_files,
+                'success': success_count,
+                'failure': failure_count,
+                'processed_files': processed_files,
+                'message': f'Processing completed! {success_count} success, {failure_count} failure out of {total_files} files.'
+            }
+            
+            self.status_message.emit(f"🎉 Final Results: {success_count} success, {failure_count} failure out of {total_files} files")
+            self.status_message.emit(f"📈 Success rate: {(success_count/total_files*100):.1f}%" if total_files > 0 else "Success rate: 0%")
+            
+            self.processing_finished.emit(results)
+            
+        except Exception as e:
+            error_msg = f"💥 CRITICAL ERROR during ArUco processing: {str(e)}"
+            self.status_message.emit(error_msg)
+            results = {
+                'total': 0, 'success': 0, 'failure': 0,
+                'message': f'Error during ArUco processing: {str(e)}'
+            }
+            self.processing_finished.emit(results)
 
 
 class ResultsPanel(QWidget):
@@ -89,8 +247,33 @@ class ResultsPanel(QWidget):
         """)
         self.upload_button.clicked.connect(self.upload_results)
         
+        self.process_aruco_button = QPushButton("🎯 Process ArUco Images")
+        self.process_aruco_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ff6600;
+                color: white;
+                padding: 8px 15px;
+                border-radius: 5px;
+                font-size: 12px;
+                border: none;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e55a00;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        self.process_aruco_button.clicked.connect(self.start_aruco_processing)
+        if not ALL_DEPENDENCIES_AVAILABLE:
+            self.process_aruco_button.setEnabled(False)
+            self.process_aruco_button.setToolTip("Required dependencies not available. Install opencv-python, pytesseract, and numpy.")
+
         button_layout.addWidget(self.scan_button)
         button_layout.addWidget(self.upload_button)
+        button_layout.addWidget(self.process_aruco_button)
         button_layout.addStretch()
         
         title_button_layout.addWidget(title)
@@ -116,18 +299,30 @@ class ResultsPanel(QWidget):
                 border-bottom: 2px solid #3f72af;
             }
         """)
-        
+
+        # ArUco Processing Tab (make this the first tab)
+        self.aruco_tab = self.create_aruco_processing_tab()
+        self.tab_widget.addTab(self.aruco_tab, "🎯 ArUco Processing")
+
+        # Processing Log Tab
+        self.processing_log_tab = self.create_processing_log_tab()
+        self.tab_widget.addTab(self.processing_log_tab, "📋 Processing Log")
+
         # Folder Overview Tab
         self.overview_tab = self.create_overview_tab()
-        self.tab_widget.addTab(self.overview_tab, "📁 Folder Overview")
-        
+        self.tab_widget.addTab(self.overview_tab, "� Folder Overview")
+
         # Image Details Tab
         self.details_tab = self.create_details_tab()
         self.tab_widget.addTab(self.details_tab, "🖼️ Image Details")
-        
+
         # Add widgets to main layout
         layout.addWidget(header_frame)
         layout.addWidget(self.tab_widget)
+
+        # Set ArUco Processing tab as the default visible tab
+        self.tab_widget.setCurrentIndex(0)
+        
         
     def create_overview_tab(self):
         widget = QWidget()
@@ -267,265 +462,490 @@ class ResultsPanel(QWidget):
         
         return widget
         
-    @pyqtSlot(str)
-    def analyze_folder(self, folder_path):
-        self.current_folder = folder_path
-        self.update_folder_overview()
+    def create_aruco_processing_tab(self):
+        """Create the ArUco marker processing configuration tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
         
-    def update_folder_overview(self):
-        if not self.current_folder:
+        # Configuration Section
+        config_group = QGroupBox("🎯 ArUco Marker Configuration")
+        config_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        config_layout = QFormLayout(config_group)
+        
+        # Expected marker IDs input
+        marker_layout = QVBoxLayout()
+        
+
+        # Create four rows of checkboxes (5 markers each, for 1-20)
+        marker_rows = [QHBoxLayout() for _ in range(4)]
+        self.marker_checkboxes = []
+        for i in range(1, 21):  # Markers 1 to 20
+            checkbox = QCheckBox(f"Marker {i}")
+            checkbox.setChecked(True)
+            self.marker_checkboxes.append(checkbox)
+            row_idx = (i - 1) // 5
+            marker_rows[row_idx].addWidget(checkbox)
+        for row in marker_rows:
+            row.addStretch()
+            marker_layout.addLayout(row)
+
+        config_layout.addRow("Expected Markers:", marker_layout)
+        
+        # Add info about ArUco format
+        format_info_label = QLabel("Using ArUco DICT_4X4_50 format (Valid IDs: 0-49)")
+        format_info_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
+        config_layout.addRow("", format_info_label)
+        
+        # Processing options
+        self.ocr_enabled_checkbox = QCheckBox("Enable OCR Text Extraction")
+        self.ocr_enabled_checkbox.setChecked(True)
+        config_layout.addRow("OCR Options:", self.ocr_enabled_checkbox)
+        
+        layout.addWidget(config_group)
+        
+        # Processing Status Section
+        status_group = QGroupBox("📊 Processing Status")
+        status_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        status_layout = QVBoxLayout(status_group)
+        
+        # Progress bar
+        self.aruco_progress_bar = QProgressBar()
+        self.aruco_progress_bar.setVisible(False)
+        status_layout.addWidget(self.aruco_progress_bar)
+        
+        # Status label
+        self.aruco_status_label = QLabel("Ready to process images")
+        self.aruco_status_label.setStyleSheet("color: #666; padding: 10px;")
+        status_layout.addWidget(self.aruco_status_label)
+        
+        # Results text area
+        self.aruco_results_text = QTextEdit()
+        self.aruco_results_text.setMaximumHeight(200)
+        self.aruco_results_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+                padding: 10px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+            }
+        """)
+        self.aruco_results_text.setPlainText("Processing results will appear here...")
+        status_layout.addWidget(self.aruco_results_text)
+        
+        # Add a table below the Processing Status to list file names and detected ArUco markers with midpoints
+        # Create table widget
+        self.aruco_results_table = QTableWidget()
+        self.aruco_results_table.setColumnCount(21)  # 1 for file name, 20 for markers
+        self.aruco_results_table.setHorizontalHeaderLabels(["File Name"] + [f"Marker {i}" for i in range(1, 21)])
+        self.aruco_results_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+                padding: 10px;
+                font-family: 'Arial';
+                font-size: 12px;
+            }
+        """)
+
+        # Add table to layout
+        status_layout.addWidget(self.aruco_results_table)
+
+        # Add an aggregated view below the ArUco results table
+        self.aruco_aggregated_table = QTableWidget()
+        self.aruco_aggregated_table.setColumnCount(3)  # Marker ID, Mean X, Mean Y
+        self.aruco_aggregated_table.setHorizontalHeaderLabels(["Marker ID", "Mean X", "Mean Y"])
+        self.aruco_aggregated_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+                padding: 10px;
+                font-family: 'Arial';
+                font-size: 12px;
+            }
+        """)
+
+        # Add aggregated table to layout
+        status_layout.addWidget(self.aruco_aggregated_table)
+
+        layout.addWidget(status_group)
+        
+        # Removed the processing log and instruction section
+        # layout.removeWidget(log_group)
+        # log_group.deleteLater()
+        # layout.removeWidget(instructions_label)
+        # instructions_label.deleteLater()
+        
+        return widget
+    
+    # Create the processing log tab
+    # This tab will be used to display the processing log and allow clearing it
+    def create_processing_log_tab(self):
+        """Create the processing log tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        
+        # Log title
+        log_title = QLabel("📋 Processing Log")
+        log_title.setFont(QFont("Arial", 12, QFont.Bold))
+        layout.addWidget(log_title)
+        
+        # Processing log text area
+        self.processing_log = QTextEdit()
+        self.processing_log.setReadOnly(True)
+        self.processing_log.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+                padding: 10px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+            }
+        """)
+        
+        layout.addWidget(self.processing_log)
+        
+        # Auto-scroll checkbox
+        self.auto_scroll_checkbox = QCheckBox("Auto-scroll to bottom")
+        self.auto_scroll_checkbox.setChecked(True)
+        layout.addWidget(self.auto_scroll_checkbox)
+        
+        return widget
+
+    
+    def start_aruco_processing(self):
+        """Start ArUco marker processing for images"""
+        if not ALL_DEPENDENCIES_AVAILABLE:
+            QMessageBox.warning(self, "Dependencies Not Available", 
+                              "Required dependencies are not available for ArUco processing.\n"
+                              "Please install: pip install opencv-python pytesseract numpy\n\n"
+                              "Note: You may need to fix numpy/pandas version conflicts.")
             return
-            
-        try:
-            image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
-            files = os.listdir(self.current_folder)
-            image_files = [
-                f for f in files 
-                if os.path.splitext(f.lower())[1] in image_extensions
-            ]
-            
-            if not image_files:
-                self.total_images_label.setText("0")
-                self.total_size_label.setText("0 B")
-                self.avg_size_label.setText("0 B")
-                self.formats_label.setText("None")
-                self.format_breakdown.setText("No images found in folder")
-                return
-            
-            # Calculate statistics
-            total_images = len(image_files)
-            total_size = 0
-            format_counts = {}
-            
-            for filename in image_files:
-                filepath = os.path.join(self.current_folder, filename)
-                try:
-                    size = os.path.getsize(filepath)
-                    total_size += size
-                    
-                    ext = os.path.splitext(filename.lower())[1]
-                    format_counts[ext] = format_counts.get(ext, 0) + 1
-                except:
-                    continue
-            
-            avg_size = total_size / total_images if total_images > 0 else 0
-            
-            # Update labels
-            self.total_images_label.setText(str(total_images))
-            self.total_size_label.setText(self.format_file_size(total_size))
-            self.avg_size_label.setText(self.format_file_size(avg_size))
-            
-            formats = list(format_counts.keys())
-            self.formats_label.setText(", ".join(formats) if formats else "None")
-            
-            # Format breakdown
-            breakdown_text = ""
-            for ext, count in sorted(format_counts.items()):
-                percentage = (count / total_images) * 100
-                breakdown_text += f"{ext.upper()}: {count} files ({percentage:.1f}%)\n"
-            
-            self.format_breakdown.setText(breakdown_text.strip())
-            
-        except Exception as e:
-            self.total_images_label.setText("Error")
-            self.total_size_label.setText("Error")
-            self.avg_size_label.setText("Error")
-            self.formats_label.setText("Error")
-            self.format_breakdown.setText(f"Error analyzing folder: {str(e)}")
-            
-    @pyqtSlot(str)
-    def show_image_details(self, image_path):
-        self.current_image = image_path
-        self.update_image_preview(image_path)
-        self.update_image_properties(image_path)
         
-        # Switch to details tab
-        self.tab_widget.setCurrentIndex(1)
+        if not self.current_folder:
+            QMessageBox.warning(self, "No Folder Selected", 
+                              "Please select a folder with images first.")
+            return
+        # Use the current folder as the output folder automatically
+        output_folder = self.current_folder
         
-    def update_image_preview(self, image_path):
-        try:
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                # Scale to fit the larger preview area while maintaining aspect ratio
-                # Get the scroll area size for better scaling
-                available_width = 600  # Approximate available width
-                available_height = 400  # Minimum height we set
-                
-                scaled_pixmap = pixmap.scaled(
-                    available_width, available_height, 
-                    Qt.KeepAspectRatio, 
-                    Qt.SmoothTransformation
-                )
-                self.image_preview.setPixmap(scaled_pixmap)
-                
-                # If scanning, show filename in window title or status
-                if self.is_scanning:
-                    filename = os.path.basename(image_path)
-                    self.image_preview.setToolTip(f"Currently viewing: {filename}")
+        # Get expected marker IDs from checkboxes (should be 1-based, not 0-based)
+        expected_markers = []
+        for i, checkbox in enumerate(self.marker_checkboxes, start=1):
+            if checkbox.isChecked():
+                expected_markers.append(i)
+        
+        if not expected_markers:
+            QMessageBox.warning(self, "No Markers Selected", 
+                              "Please select at least one expected ArUco marker.")
+            return
+        
+        # Update UI
+        self.process_aruco_button.setEnabled(False)
+        self.aruco_progress_bar.setVisible(True)
+        self.aruco_progress_bar.setValue(0)
+        self.aruco_status_label.setText("Starting ArUco processing...")
+        self.aruco_results_text.clear()
+        
+        # Start processing thread
+        self.aruco_worker = ArUcoProcessingWorker(
+            self.current_folder, output_folder, expected_markers
+        )
+        self.aruco_worker.progress_updated.connect(self.update_aruco_progress)
+        self.aruco_worker.file_processed.connect(self.on_aruco_file_processed)
+        self.aruco_worker.processing_finished.connect(self.on_aruco_processing_finished)
+        self.aruco_worker.status_message.connect(self.add_to_processing_log)
+        self.aruco_worker.start()
+        
+        # Clear the processing log and add initial message
+        self.processing_log.clear()
+        self.add_to_processing_log("🚀 ArUco processing started...")
+    
+    def clear_processing_log(self):
+        """Clear the processing log"""
+        self.processing_log.clear()
+        self.add_to_processing_log("📋 Log cleared")
+    
+    def add_to_processing_log(self, message):
+        """Add a timestamped message to the processing log"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # Include milliseconds
+        log_entry = f"[{timestamp}] {message}"
+        
+        # Add to log
+        self.processing_log.append(log_entry)
+        
+        # Auto-scroll to bottom if enabled
+        if self.auto_scroll_checkbox.isChecked():
+            scrollbar = self.processing_log.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+    
+    def update_aruco_progress(self, progress, current_file):
+        """Update ArUco processing progress"""
+        self.aruco_progress_bar.setValue(progress)
+        self.aruco_status_label.setText(f"Processing: {current_file}")
+    
+    def populate_aruco_results_table(self, results):
+        """Populate the ArUco results table with processing results"""
+        def to_int_tuple(val):
+            # Convert tuple of np types to plain int
+            if isinstance(val, (tuple, list)) and len(val) == 2:
+                return (int(round(val[0])), int(round(val[1])))
+            return ("NA", "NA")
+
+        self.aruco_results_table.setRowCount(len(results))
+        marker_ids = list(range(1, 21))
+        for row, result in enumerate(results):
+            file_name_item = QTableWidgetItem(result.get('filename', ''))
+            self.aruco_results_table.setItem(row, 0, file_name_item)
+            detection_info = result.get('detection_info', {})
+            detected_ids = detection_info.get('detected_ids', [])
+            midpoints = detection_info.get('marker_midpoints', [])
+            for col, marker_id in enumerate(marker_ids, start=1):
+                if marker_id in detected_ids:
+                    idx = detected_ids.index(marker_id)
+                    pt = midpoints[idx] if idx < len(midpoints) else ("NA", "NA")
+                    x, y = to_int_tuple(pt)
+                    midpoint_str = f"{x},{y}" if x != "NA" and y != "NA" else "NA"
+                    self.aruco_results_table.setItem(row, col, QTableWidgetItem(midpoint_str))
+                else:
+                    self.aruco_results_table.setItem(row, col, QTableWidgetItem("NA"))
+
+        # Populate aggregated table with mean values for all marker IDs 1-20
+        aggregated_data = {marker_id: [] for marker_id in marker_ids}
+        for result in results:
+            detection_info = result.get('detection_info', {})
+            detected_ids = detection_info.get('detected_ids', [])
+            midpoints = detection_info.get('marker_midpoints', [])
+            for marker_id in marker_ids:
+                if marker_id in detected_ids:
+                    idx = detected_ids.index(marker_id)
+                    pt = midpoints[idx] if idx < len(midpoints) else ("NA", "NA")
+                    x, y = to_int_tuple(pt)
+                    if x != "NA" and y != "NA":
+                        aggregated_data[marker_id].append((x, y))
+
+        self.aruco_aggregated_table.setRowCount(len(marker_ids))
+        for row, marker_id in enumerate(marker_ids):
+            points = aggregated_data[marker_id]
+            if points:
+                mean_x = int(round(np.mean([p[0] for p in points])))
+                mean_y = int(round(np.mean([p[1] for p in points])))
             else:
-                self.image_preview.setText("Failed to load image")
-        except Exception as e:
-            self.image_preview.setText(f"Error loading image: {str(e)}")
-            
-    def update_image_properties(self, image_path):
-        try:
-            # Basic file properties
-            filename = os.path.basename(image_path)
-            file_size = os.path.getsize(image_path)
-            
-            properties = f"File: {filename}\n"
-            properties += f"Size: {self.format_file_size(file_size)}\n"
-            properties += f"Path: {image_path}\n\n"
-            
-            # Image properties using PIL
-            try:
-                with Image.open(image_path) as img:
-                    properties += f"Dimensions: {img.width} x {img.height} pixels\n"
-                    properties += f"Format: {img.format}\n"
-                    properties += f"Mode: {img.mode}\n"
-                    
-                    # EXIF data
-                    if hasattr(img, '_getexif') and img._getexif():
-                        properties += "\nEXIF Data:\n"
-                        exif = img._getexif()
-                        for tag_id, value in exif.items():
-                            tag = TAGS.get(tag_id, tag_id)
-                            if isinstance(value, str) and len(str(value)) < 100:
-                                properties += f"  {tag}: {value}\n"
-                    else:
-                        properties += "\nNo EXIF data available\n"
-                        
-            except Exception as e:
-                properties += f"\nError reading image properties: {str(e)}\n"
-                
-            self.image_properties.setPlainText(properties)
-            
-        except Exception as e:
-            self.image_properties.setPlainText(f"Error: {str(e)}")
-            
-    def format_file_size(self, size_bytes):
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        else:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-    
-    def start_scan_all_images(self):
-        """Start scanning all images in the current folder"""
-        if not self.current_folder:
-            return
-            
-        # Get all image files
-        try:
-            image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
-            files = os.listdir(self.current_folder)
-            self.scan_images_list = [
-                os.path.join(self.current_folder, f) for f in files 
-                if os.path.splitext(f.lower())[1] in image_extensions
-            ]
-            
-            if not self.scan_images_list:
-                return
-                
-            # Switch to details tab and start scanning
-            self.tab_widget.setCurrentIndex(1)
-            self.current_scan_index = 0
-            self.is_scanning = True
-            
-            # Update button text and disable it
-            self.scan_button.setText("🔄 Processing...")
-            self.scan_button.setEnabled(False)
-            
-            # Start the timer (20 seconds per image)
-            self.scan_timer.start(2000)  # 2 seconds = 2000 milliseconds
-            
-            # Load first image immediately
-            self.load_scan_image()
-            
-        except Exception as e:
-            print(f"Error starting scan: {e}")
-    
-    def load_scan_image(self):
-        """Load the current scan image"""
-        if self.current_scan_index < len(self.scan_images_list):
-            image_path = self.scan_images_list[self.current_scan_index]
-            self.update_image_preview(image_path)
-            self.update_image_properties(image_path)
-            
-            # Update scan button to show progress
-            progress = f"Processing... ({self.current_scan_index + 1}/{len(self.scan_images_list)})"
-            self.scan_button.setText(progress)
+                mean_x = "NA"
+                mean_y = "NA"
+            self.aruco_aggregated_table.setItem(row, 0, QTableWidgetItem(str(marker_id)))
+            self.aruco_aggregated_table.setItem(row, 1, QTableWidgetItem(str(mean_x)))
+            self.aruco_aggregated_table.setItem(row, 2, QTableWidgetItem(str(mean_y)))
     
     def next_scan_image(self):
-        """Move to the next image in scan"""
+        """Scan the next image in the folder and update the UI."""
+        if not self.scan_images_list or self.current_scan_index >= len(self.scan_images_list):
+            self.scan_timer.stop()
+            self.is_scanning = False
+            self.aruco_status_label.setText("Scanning completed.")
+            return
+
+        current_image_path = self.scan_images_list[self.current_scan_index]
         self.current_scan_index += 1
-        
-        if self.current_scan_index < len(self.scan_images_list):
-            # Load next image
-            self.load_scan_image()
-        else:
-            # Scanning complete
-            self.stop_scanning()
-    
-    def stop_scanning(self):
-        """Stop the scanning process"""
-        self.scan_timer.stop()
-        self.is_scanning = False
-        self.scan_button.setText("🔍 Scan All Images")
-        self.scan_button.setEnabled(True)
-        
-        # Show completion message
-        self.image_preview.setText("✅ Scan completed!\nAll images have been processed.")
+
+        try:
+            pixmap = QPixmap(current_image_path)
+            self.image_preview.setPixmap(pixmap.scaled(
+                self.image_preview.width(), self.image_preview.height(), Qt.KeepAspectRatio
+            ))
+            self.image_properties.setPlainText(f"Image: {current_image_path}\nSize: {pixmap.width()}x{pixmap.height()} pixels")
+            self.aruco_status_label.setText(f"Scanning: {current_image_path}")
+        except Exception as e:
+            self.aruco_status_label.setText(f"Error scanning {current_image_path}: {str(e)}")
+
+    def start_scan_all_images(self):
+        """Start scanning all images in the selected folder."""
+        if not self.current_folder:
+            QMessageBox.warning(self, "No Folder Selected", "Please select a folder with images first.")
+            return
+
+        self.scan_images_list = []
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+
+        for root, dirs, files in os.walk(self.current_folder):
+            for file in files:
+                if any(file.lower().endswith(ext) for ext in image_extensions):
+                    self.scan_images_list.append(os.path.join(root, file))
+
+        if not self.scan_images_list:
+            QMessageBox.warning(self, "No Images Found", "No valid images found in the selected folder.")
+            return
+
+        self.current_scan_index = 0
+        self.is_scanning = True
+        self.scan_timer.start(1000)  # Scan one image per second
+        self.aruco_status_label.setText("Starting scan...")
+        self.add_to_processing_log("🚀 Starting scan of all images...")
     
     def upload_results(self):
-        """Handle upload results functionality"""
-        from PyQt5.QtWidgets import QMessageBox, QFileDialog
-        
-        if not self.current_folder:
-            QMessageBox.warning(self, "No Data", "No folder analyzed yet. Please select a folder first.")
+        """Export the ArUco results table and aggregated table to CSV files."""
+        from PyQt5.QtWidgets import QFileDialog
+        import csv
+
+        # Ask user for export folder
+        export_folder = QFileDialog.getExistingDirectory(self, "Select Folder to Save Results")
+        if not export_folder:
             return
-        
-        # Get save location
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Analysis Results",
-            f"image_analysis_results.txt",
-            "Text Files (*.txt);;All Files (*)"
-        )
-        
-        if filename:
-            try:
-                # Collect analysis data
-                total_images = self.total_images_label.text()
-                total_size = self.total_size_label.text()
-                avg_size = self.avg_size_label.text()
-                formats = self.formats_label.text()
-                breakdown = self.format_breakdown.text()
-                
-                # Create report
-                report = f"""Image Folder Analysis Report
-Generated on: {self.current_folder}
 
-SUMMARY:
-========
-Total Images: {total_images}
-Total Size: {total_size}
-Average Size: {avg_size}
-Formats Found: {formats}
+        # Export per-image results table
+        per_image_csv = os.path.join(export_folder, "aruco_per_image_results.csv")
+        with open(per_image_csv, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            # Write header
+            headers = [self.aruco_results_table.horizontalHeaderItem(i).text() for i in range(self.aruco_results_table.columnCount())]
+            writer.writerow(headers)
+            # Write rows
+            for row in range(self.aruco_results_table.rowCount()):
+                row_data = []
+                for col in range(self.aruco_results_table.columnCount()):
+                    item = self.aruco_results_table.item(row, col)
+                    row_data.append(item.text() if item else "")
+                writer.writerow(row_data)
 
-FORMAT BREAKDOWN:
-================
-{breakdown}
+        # Export aggregated results table
+        agg_csv = os.path.join(export_folder, "aruco_aggregated_results.csv")
+        with open(agg_csv, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            headers = [self.aruco_aggregated_table.horizontalHeaderItem(i).text() for i in range(self.aruco_aggregated_table.columnCount())]
+            writer.writerow(headers)
+            for row in range(self.aruco_aggregated_table.rowCount()):
+                row_data = []
+                for col in range(self.aruco_aggregated_table.columnCount()):
+                    item = self.aruco_aggregated_table.item(row, col)
+                    row_data.append(item.text() if item else "")
+                writer.writerow(row_data)
 
-Generated by Image Folder Analyzer v1.0
-"""
-                
-                # Save to file
-                with open(filename, 'w') as f:
-                    f.write(report)
-                
-                QMessageBox.information(self, "Success", f"Results saved to:\n{filename}")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save results:\n{str(e)}")
+        QMessageBox.information(self, "Export Complete", f"Results exported to:\n{per_image_csv}\n{agg_csv}")
+    
+    def analyze_folder(self, folder_path):
+        """Set the current folder, update the overview tab, and load all images in the left pane."""
+        self.current_folder = folder_path
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+        image_files = []
+        total_size = 0
+        formats = set()
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                ext = os.path.splitext(file.lower())[1]
+                if ext in image_extensions:
+                    image_files.append(os.path.join(root, file))
+                    total_size += os.path.getsize(os.path.join(root, file))
+                    formats.add(ext)
+        num_images = len(image_files)
+        avg_size = int(total_size / num_images) if num_images > 0 else 0
+        self.total_images_label.setText(str(num_images))
+        self.total_size_label.setText(f"{total_size // 1024} KB")
+        self.avg_size_label.setText(f"{avg_size // 1024} KB" if avg_size else "0 B")
+        self.formats_label.setText(", ".join(sorted(formats)) if formats else "None")
+        # Format breakdown
+        breakdown = {}
+        for file in image_files:
+            ext = os.path.splitext(file.lower())[1]
+            breakdown[ext] = breakdown.get(ext, 0) + 1
+        if breakdown:
+            breakdown_str = ", ".join([f"{k}: {v}" for k, v in sorted(breakdown.items())])
+            self.format_breakdown.setText(breakdown_str)
+        else:
+            self.format_breakdown.setText("No data available")
+
+        # Load all images into the left pane (image preview list)
+        # If you have a QListWidget or similar for thumbnails, update it here
+        # For this template, we update the scan_images_list and reset the preview
+        self.scan_images_list = image_files.copy()
+        self.current_scan_index = 0
+        if self.scan_images_list:
+            self.show_image_details(self.scan_images_list[0])
+    
+    def show_image_details(self, image_path):
+        """Display the selected image and its properties in the details tab."""
+        self.current_image = image_path
+        try:
+            pixmap = QPixmap(image_path)
+            self.image_preview.setPixmap(pixmap.scaled(
+                self.image_preview.width(), self.image_preview.height(), Qt.KeepAspectRatio
+            ))
+            # Get image size
+            size_str = f"{pixmap.width()}x{pixmap.height()} pixels"
+            # Get file size
+            file_size = os.path.getsize(image_path)
+            file_size_str = f"{file_size // 1024} KB"
+            # Compose properties text
+            props = f"Image: {image_path}\nSize: {size_str}\nFile Size: {file_size_str}"
+            self.image_properties.setPlainText(props)
+        except Exception as e:
+            self.image_preview.setText("Error loading image")
+            self.image_properties.setPlainText(f"Error: {str(e)}")
+    
+    def on_aruco_file_processed(self, result):
+        """Handle per-file ArUco processing result (update results table in real time if desired)."""
+        filename = result.get('filename', 'Unknown')
+        detection_info = result.get('detection_info', {})
+        detected_ids = detection_info.get('detected_ids', [])
+        midpoints = detection_info.get('marker_midpoints', [])
+        # Show all 20 markers
+        marker_strs = []
+        for marker_id in range(1, 21):
+            if marker_id in detected_ids:
+                idx = detected_ids.index(marker_id)
+                pt = midpoints[idx]
+                x, y = (int(round(pt[0])), int(round(pt[1]))) if isinstance(pt, (tuple, list)) and len(pt) == 2 else ("NA", "NA")
+                marker_strs.append(f"{marker_id}: {x},{y}")
+            else:
+                marker_strs.append(f"{marker_id}: NA")
+        marker_summary = "; ".join(marker_strs)
+        self.aruco_results_text.append(f"Processed: {filename} | Markers: {marker_summary}")
+
+    def on_aruco_processing_finished(self, results):
+        """Handle completion of ArUco batch processing."""
+        processed_files = results.get('processed_files', [])
+        # Force expected markers to [1..20] and check detection
+        expected_markers = list(range(1, 21))
+        for result in processed_files:
+            detection_info = result.get('detection_info', {})
+            detected_ids = set(detection_info.get('detected_ids', []))
+            missing = [mid for mid in expected_markers if mid not in detected_ids]
+            extra = [mid for mid in detected_ids if mid not in expected_markers]
+            print(f"[CHECK] {result.get('filename', '')}: Detected={sorted(detected_ids)}, Missing={missing}, Extra={extra}")
+        self.populate_aruco_results_table(processed_files)
+        self.aruco_progress_bar.setVisible(False)
+        self.process_aruco_button.setEnabled(True)
+        self.aruco_status_label.setText(results.get('message', 'Processing complete.'))
+        self.aruco_results_text.append("\nBatch processing complete.")

@@ -83,6 +83,12 @@ class MainWindow(QMainWindow):
         open_folder_action.triggered.connect(self.open_folder)
         file_menu.addAction(open_folder_action)
         
+        # Open PDF action
+        open_pdf_action = QAction('Open PDF', self)
+        open_pdf_action.setStatusTip('Open a PDF and extract images from pages')
+        open_pdf_action.triggered.connect(self.open_pdf_and_extract_images)
+        file_menu.addAction(open_pdf_action)
+        
         file_menu.addSeparator()
         
         # Exit action
@@ -94,6 +100,12 @@ class MainWindow(QMainWindow):
         
         # View menu
         view_menu = menubar.addMenu('&View')
+        
+        # Button to create QR code to connect to http server from mobile
+        qr_code_action = QAction('Create QR Code', self)
+        qr_code_action.setStatusTip('Create a QR code to connect to the HTTP server from your mobile device')
+        qr_code_action.triggered.connect(self.image_panel.create_qr_code)
+        view_menu.addAction(qr_code_action)
         
         # Refresh action
         refresh_action = QAction('&Refresh', self)
@@ -113,7 +125,12 @@ class MainWindow(QMainWindow):
         
         # Status bar
         self.statusBar().showMessage('Ready')
-        
+
+    def qr_code_action(self):
+        """Create a QR code for the HTTP server connection"""
+        self.image_panel.create_qr_code()
+        self.statusBar().showMessage('QR Code created for HTTP server connection')
+         
     def open_folder(self):
         from PyQt5.QtWidgets import QFileDialog
         folder = QFileDialog.getExistingDirectory(
@@ -145,6 +162,34 @@ class MainWindow(QMainWindow):
             "Built with PyQt5."
         )
         
+    def open_pdf_and_extract_images(self):
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+        try:
+            from pdf2image import convert_from_path
+        except ImportError:
+            QMessageBox.critical(self, "Missing Dependency", "Please install pdf2image and poppler-utils (brew install poppler)")
+            return
+        import os
+        pdf_path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
+        if not pdf_path:
+            return
+        output_folder = os.path.splitext(pdf_path)[0] + "_pages"
+        os.makedirs(output_folder, exist_ok=True)
+        try:
+            images = convert_from_path(pdf_path)
+            image_paths = []
+            for i, img in enumerate(images):
+                img_path = os.path.join(output_folder, f"page_{i+1}.png")
+                img.save(img_path, "PNG")
+                image_paths.append(img_path)
+            QMessageBox.information(self, "PDF Extracted", f"Extracted {len(image_paths)} images to {output_folder}")
+            # Load these images into the side panel and image panel
+            self.results_panel.analyze_folder(output_folder)
+            if hasattr(self, 'image_panel'):
+                self.image_panel.load_folder(output_folder)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to extract images: {e}")
+
     def resizeEvent(self, event):
         """Handle window resize to maintain image panel proportions"""
         super().resizeEvent(event)
@@ -154,3 +199,22 @@ class MainWindow(QMainWindow):
             image_panel_width = min(300, int(total_width * 0.2))
             results_panel_width = total_width - image_panel_width
             self.splitter.setSizes([image_panel_width, results_panel_width])
+            
+    def add_log_message(self, message):
+        """Append a log message to the bottom of the results panel log area."""
+        try:
+            
+            print("[DEBUG UI LOG] Slot entered")
+            print(f"[DEBUG UI LOG] Message type: {type(message)}, value: {message}")
+
+            if hasattr(self, 'results_panel') and hasattr(self.results_panel, 'add_to_processing_log'):
+                print("[DEBUG UI LOG] Calling results_panel.add_to_processing_log")
+                self.results_panel.add_to_processing_log(message)
+                print("[DEBUG UI LOG] Called results_panel.add_to_processing_log successfully")
+            else:
+                print("[DEBUG UI LOG] results_panel or add_to_processing_log not found")
+                print(f"[UI LOG] {message}")
+
+            print("[DEBUG UI LOG] Slot completed")
+        except Exception as e:
+            print(f"[UI LOG ERROR] Exception in add_log_message: {e}")
