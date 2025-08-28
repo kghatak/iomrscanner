@@ -34,6 +34,10 @@ A modern PyQt5 desktop application for analyzing OMR sheets folders with profess
    ```bash
    python main.py
    ```
+4.1 **Run the application witn venv activate**
+   ```
+   source qt_env1/bin/activate && python main.py
+   ```
 
 ## 📦 Building Installers
 

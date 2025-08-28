@@ -167,6 +167,159 @@ class ArUcoProcessingWorker(QThread):
             self.processing_finished.emit(results)
 
 
+class PipelineProcessingWorker(QThread):
+    """Worker thread for comprehensive pipeline processing of images"""
+    progress_updated = pyqtSignal(int, str)  # progress, current_file
+    processing_finished = pyqtSignal(dict)  # results dictionary
+    file_processed = pyqtSignal(dict)  # individual file result
+    status_message = pyqtSignal(str)  # detailed status messages for logging
+    
+    def __init__(self, source_folder, output_folder, expected_markers):
+        super().__init__()
+        self.source_folder = source_folder
+        self.output_folder = output_folder
+        self.expected_markers = expected_markers
+        self.is_cancelled = False
+        self.processor = ImageProcessor() if ALL_DEPENDENCIES_AVAILABLE else None
+        
+    def cancel_processing(self):
+        self.is_cancelled = True
+        
+    def run(self):
+        """Main pipeline processing loop"""
+        try:
+            self.status_message.emit("🔄 Initializing pipeline processing...")
+            
+            if not ALL_DEPENDENCIES_AVAILABLE:
+                self.status_message.emit("❌ ERROR: Required dependencies not available")
+                error_msg = "Missing dependencies. "
+                if not OPENCV_AVAILABLE:
+                    error_msg += "Please install: pip install opencv-python pytesseract numpy"
+                self.processing_finished.emit({
+                    'total': 0, 'success': 0, 'failure': 0,
+                    'message': error_msg
+                })
+                return
+            
+            self.status_message.emit("✅ All dependencies loaded successfully")
+            
+            # Set expected markers
+            self.status_message.emit(f"🎯 Setting expected ArUco markers: {self.expected_markers}")
+            self.processor.set_expected_markers(self.expected_markers)
+            
+            # Create output directories
+            self.status_message.emit("📁 Creating output directories...")
+            results_folder = os.path.join(self.output_folder, "pipeline_results")
+            os.makedirs(results_folder, exist_ok=True)
+            self.status_message.emit(f"📁 Results folder: {results_folder}")
+            
+            # Create success and error folders
+            success_folder = os.path.join(results_folder, "success")
+            error_folder = os.path.join(results_folder, "error")
+            os.makedirs(success_folder, exist_ok=True)
+            os.makedirs(error_folder, exist_ok=True)
+            self.status_message.emit(f"📁 Success folder: {success_folder}")
+            self.status_message.emit(f"📁 Error folder: {error_folder}")
+            
+            # Get all image files
+            self.status_message.emit("🔍 Scanning for image files...")
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+            image_files = []
+            
+            for root, dirs, files in os.walk(self.source_folder):
+                for file in files:
+                    if os.path.splitext(file.lower())[1] in image_extensions:
+                        image_files.append(os.path.join(root, file))
+            
+            total_files = len(image_files)
+            self.status_message.emit(f"📊 Found {total_files} image files to process")
+            
+            if total_files == 0:
+                self.status_message.emit("⚠️ No image files found in the selected folder")
+                self.processing_finished.emit({
+                    'total': 0, 'success': 0, 'failure': 0,
+                    'message': 'No image files found in the selected folder.'
+                })
+                return
+            
+            success_count = 0
+            failure_count = 0
+            processed_files = []
+            
+            self.status_message.emit("🚀 Starting pipeline processing...")
+            
+            # Process each image through the pipeline
+            for i, image_path in enumerate(image_files):
+                if self.is_cancelled:
+                    self.status_message.emit("🛑 Processing cancelled by user")
+                    break
+                
+                filename = os.path.basename(image_path)
+                current_progress = int((i / total_files) * 100)
+                
+                self.status_message.emit(f"📷 [{i+1}/{total_files}] Processing: {filename}")
+                self.progress_updated.emit(current_progress, f"Processing: {filename}")
+                
+                # Process image through the comprehensive pipeline
+                self.status_message.emit(f"🔧 Running pipeline for {filename}...")
+                result = self.processor.process_image_pipeline(image_path, results_folder)
+                
+                # Log pipeline results
+                if result['success']:
+                    success_count += 1
+                    stages = result.get('stages', {})
+                    stage_summary = []
+                    for stage_name, stage_result in stages.items():
+                        if stage_result.get('success'):
+                            stage_summary.append(f"✅{stage_name}")
+                        else:
+                            stage_summary.append(f"❌{stage_name}")
+                    
+                    self.status_message.emit(f"✅ {filename}: Pipeline completed - {' '.join(stage_summary)}")
+                    
+                    # Log roll number if extracted
+                    roll_number = result.get('stages', {}).get('roll_number_extraction', {}).get('roll_number')
+                    if roll_number:
+                        self.status_message.emit(f"🆔 {filename}: Roll Number - {roll_number}")
+                    
+                    # Log API upload status
+                    if result.get('api_upload_success'):
+                        upload_id = result.get('stages', {}).get('api_upload', {}).get('upload_id')
+                        self.status_message.emit(f"📤 {filename}: Uploaded to API - {upload_id}")
+                else:
+                    failure_count += 1
+                    error_stage = result.get('error_stage', 'unknown')
+                    error_message = result.get('error_message', 'Unknown error')
+                    self.status_message.emit(f"❌ {filename}: Failed at {error_stage} - {error_message}")
+                
+                processed_files.append(result)
+                self.file_processed.emit(result)
+            
+            # Final results
+            self.status_message.emit("📊 Pipeline processing completed! Generating final report...")
+            results = {
+                'total': total_files,
+                'success': success_count,
+                'failure': failure_count,
+                'processed_files': processed_files,
+                'message': f'Pipeline processing completed! {success_count} success, {failure_count} failure out of {total_files} files.'
+            }
+            
+            self.status_message.emit(f"🎉 Final Results: {success_count} success, {failure_count} failure out of {total_files} files")
+            self.status_message.emit(f"📈 Success rate: {(success_count/total_files*100):.1f}%" if total_files > 0 else "Success rate: 0%")
+            
+            self.processing_finished.emit(results)
+            
+        except Exception as e:
+            error_msg = f"💥 CRITICAL ERROR during pipeline processing: {str(e)}"
+            self.status_message.emit(error_msg)
+            results = {
+                'total': 0, 'success': 0, 'failure': 0,
+                'message': f'Error during pipeline processing: {str(e)}'
+            }
+            self.processing_finished.emit(results)
+
+
 class ResultsPanel(QWidget):
     def __init__(self):
         super().__init__()
@@ -517,6 +670,65 @@ class ResultsPanel(QWidget):
         
         layout.addWidget(config_group)
         
+        # Pipeline Processing Section
+        pipeline_group = QGroupBox("🔧 Pipeline Processing")
+        pipeline_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        pipeline_layout = QVBoxLayout(pipeline_group)
+        
+        # Pipeline description
+        pipeline_desc = QLabel("""
+        Comprehensive pipeline processing:
+        1. ✅ Check ArUco markers presence
+        2. 🔄 Check and rotate tilted images  
+        3. 🆔 Extract exam roll number
+        4. 📝 Process OMR sheet
+        5. 📤 Upload to API
+        """)
+        pipeline_desc.setStyleSheet("color: #666; font-size: 11px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;")
+        pipeline_layout.addWidget(pipeline_desc)
+        
+        # Pipeline processing button
+        self.process_pipeline_button = QPushButton("🚀 Start Pipeline Processing")
+        self.process_pipeline_button.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                padding: 12px 20px;
+                border-radius: 5px;
+                font-size: 14px;
+                border: none;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        self.process_pipeline_button.clicked.connect(self.start_pipeline_processing)
+        if not ALL_DEPENDENCIES_AVAILABLE:
+            self.process_pipeline_button.setEnabled(False)
+            self.process_pipeline_button.setToolTip("Required dependencies not available. Install opencv-python, pytesseract, and numpy.")
+        
+        pipeline_layout.addWidget(self.process_pipeline_button)
+        
+        layout.addWidget(pipeline_group)
+        
         # Processing Status Section
         status_group = QGroupBox("📊 Processing Status")
         status_group.setStyleSheet("""
@@ -692,6 +904,57 @@ class ResultsPanel(QWidget):
         # Clear the processing log and add initial message
         self.processing_log.clear()
         self.add_to_processing_log("🚀 ArUco processing started...")
+    
+    def start_pipeline_processing(self):
+        """Start comprehensive pipeline processing"""
+        if not ALL_DEPENDENCIES_AVAILABLE:
+            QMessageBox.warning(self, "Dependencies Not Available", 
+                              "Required dependencies are not available for pipeline processing.\n"
+                              "Please install: pip install opencv-python pytesseract numpy\n\n"
+                              "Note: You may need to fix numpy/pandas version conflicts.")
+            return
+        
+        if not self.current_folder:
+            QMessageBox.warning(self, "No Folder Selected", 
+                              "Please select a folder with images first.")
+            return
+        
+        # Get expected marker IDs from checkboxes
+        expected_markers = []
+        for i, checkbox in enumerate(self.marker_checkboxes, start=1):
+            if checkbox.isChecked():
+                expected_markers.append(i)
+        
+        if not expected_markers:
+            QMessageBox.warning(self, "No Markers Selected", 
+                              "Please select at least one expected ArUco marker.")
+            return
+        
+        # Create output folder for pipeline results
+        output_folder = os.path.join(self.current_folder, "pipeline_processing_results")
+        os.makedirs(output_folder, exist_ok=True)
+        
+        # Update UI
+        self.process_pipeline_button.setEnabled(False)
+        self.process_aruco_button.setEnabled(False)  # Disable both buttons
+        self.aruco_progress_bar.setVisible(True)
+        self.aruco_progress_bar.setValue(0)
+        self.aruco_status_label.setText("Starting pipeline processing...")
+        self.aruco_results_text.clear()
+        
+        # Start pipeline processing thread
+        self.pipeline_worker = PipelineProcessingWorker(
+            self.current_folder, output_folder, expected_markers
+        )
+        self.pipeline_worker.progress_updated.connect(self.update_aruco_progress)
+        self.pipeline_worker.file_processed.connect(self.on_pipeline_file_processed)
+        self.pipeline_worker.processing_finished.connect(self.on_pipeline_processing_finished)
+        self.pipeline_worker.status_message.connect(self.add_to_processing_log)
+        self.pipeline_worker.start()
+        
+        # Clear the processing log and add initial message
+        self.processing_log.clear()
+        self.add_to_processing_log("🚀 Pipeline processing started...")
     
     def clear_processing_log(self):
         """Clear the processing log"""
@@ -949,3 +1212,58 @@ class ResultsPanel(QWidget):
         self.process_aruco_button.setEnabled(True)
         self.aruco_status_label.setText(results.get('message', 'Processing complete.'))
         self.aruco_results_text.append("\nBatch processing complete.")
+    
+    def on_pipeline_file_processed(self, result):
+        """Handle per-file pipeline processing result"""
+        filename = result.get('filename', 'Unknown')
+        success = result.get('success', False)
+        error_stage = result.get('error_stage', None)
+        
+        if success:
+            stages = result.get('stages', {})
+            stage_summary = []
+            for stage_name, stage_result in stages.items():
+                if stage_result.get('success'):
+                    stage_summary.append(f"✅{stage_name}")
+                else:
+                    stage_summary.append(f"❌{stage_name}")
+            
+            self.aruco_results_text.append(f"✅ {filename}: {' '.join(stage_summary)}")
+            
+            # Log roll number if extracted
+            roll_number = stages.get('roll_number_extraction', {}).get('roll_number')
+            if roll_number:
+                self.aruco_results_text.append(f"🆔 {filename}: Roll Number - {roll_number}")
+            
+            # Log API upload status
+            if result.get('api_upload_success'):
+                upload_id = stages.get('api_upload', {}).get('upload_id')
+                self.aruco_results_text.append(f"📤 {filename}: Uploaded to API - {upload_id}")
+        else:
+            self.aruco_results_text.append(f"❌ {filename}: Failed at {error_stage}")
+    
+    def on_pipeline_processing_finished(self, results):
+        """Handle completion of pipeline batch processing."""
+        processed_files = results.get('processed_files', [])
+        
+        # Count successes and failures
+        success_count = sum(1 for result in processed_files if result.get('success', False))
+        failure_count = len(processed_files) - success_count
+        
+        # Update UI
+        self.aruco_progress_bar.setVisible(False)
+        self.process_pipeline_button.setEnabled(True)
+        self.process_aruco_button.setEnabled(True)
+        self.aruco_status_label.setText(results.get('message', 'Pipeline processing complete.'))
+        self.aruco_results_text.append(f"\n🎉 Pipeline processing complete: {success_count} success, {failure_count} failure")
+        
+        # Show summary dialog
+        QMessageBox.information(
+            self, 
+            "Pipeline Processing Complete", 
+            f"Pipeline processing completed!\n\n"
+            f"✅ Successful: {success_count}\n"
+            f"❌ Failed: {failure_count}\n"
+            f"📊 Total: {len(processed_files)}\n\n"
+            f"Check the 'pipeline_processing_results' folder for detailed results."
+        )

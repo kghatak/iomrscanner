@@ -37,6 +37,10 @@ BU_test_input_pdf copy/
 aruco_imgs/
 pdf_pages/
 test_pdfs/
+.vscode/
+/test_pipeline
+/test_single_pipeline
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
