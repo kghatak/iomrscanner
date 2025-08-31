@@ -35,6 +35,14 @@ from typing import List, Tuple, Dict, Optional
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 
+# Import pipeline stages
+try:
+    from pipeline.pipeline_stages import PipelineManager
+    PIPELINE_STAGES_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Pipeline stages not available - {e}")
+    PIPELINE_STAGES_AVAILABLE = False
+
 # Check if all required dependencies are available
 ALL_DEPENDENCIES_AVAILABLE = OPENCV_AVAILABLE and NUMPY_AVAILABLE and PYTESSERACT_AVAILABLE
 
@@ -95,6 +103,14 @@ class ImageProcessor:
         # Expected ArUco marker IDs (valid range: 0-49 for DICT_4X4_50)
         # Default to IDs 1-20 for OMR/ArUco workflows
         self.expected_markers = list(range(1, 21))  # Expecting 20 markers with IDs 1-20
+        
+        # Initialize pipeline manager if available
+        if PIPELINE_STAGES_AVAILABLE:
+            self.pipeline_manager = PipelineManager(self)
+            print("[DEBUG] Pipeline manager initialized successfully")
+        else:
+            self.pipeline_manager = None
+            print("[DEBUG] Pipeline manager not available")
         
     def detect_aruco_markers(self, image_path: str) -> Tuple[List[int], Dict]:
         """
@@ -440,12 +456,7 @@ class ImageProcessor:
 
     def process_image_pipeline(self, image_path: str, output_folder: str) -> Dict:
         """
-        Comprehensive pipeline for processing OMR images:
-        1. Check basic ArUco markers are present
-        2. Check and rotate tilted images
-        3. Extract exam roll number from image
-        4. Process the OMR sheet
-        5. Upload to API
+        Comprehensive pipeline for processing OMR images using modular stages.
         
         Args:
             image_path: Path to the image to process
@@ -454,408 +465,77 @@ class ImageProcessor:
         Returns:
             Dictionary with processing results and stage information
         """
-        filename = os.path.basename(image_path)
-        name_without_ext = os.path.splitext(filename)[0]
-        
-        print(f"[PIPELINE] Starting processing for: {filename}")
-        
-        # Initialize pipeline result
-        pipeline_result = {
-            "filename": filename,
-            "success": False,
-            "stages": {},
-            "error_stage": None,
-            "error_message": None,
-            "output_path": None,
-            "api_upload_success": False
-        }
-        
-        try:
-            # Stage 1: Check basic ArUco markers are present
-            print(f"[PIPELINE] Stage 1: Checking ArUco markers for {filename}")
-            stage1_result = self._stage1_check_aruco_markers(image_path)
-            pipeline_result["stages"]["aruco_check"] = stage1_result
-            
-            if not stage1_result["success"]:
-                pipeline_result["error_stage"] = "aruco_check"
-                pipeline_result["error_message"] = stage1_result["error"]
-                return self._handle_pipeline_error(image_path, output_folder, pipeline_result)
-            
-            # Stage 2: Check and rotate tilted images
-            print(f"[PIPELINE] Stage 2: Checking image orientation for {filename}")
-            stage2_result = self._stage2_check_and_rotate_image(image_path)
-            pipeline_result["stages"]["orientation_check"] = stage2_result
-            
-            if not stage2_result["success"]:
-                pipeline_result["error_stage"] = "orientation_check"
-                pipeline_result["error_message"] = stage2_result["error"]
-                return self._handle_pipeline_error(image_path, output_folder, pipeline_result)
-            
-            # Stage 3: Extract exam roll number
-            print(f"[PIPELINE] Stage 3: Extracting roll number for {filename}")
-            stage3_result = self._stage3_extract_roll_number(stage2_result["rotated_image_path"])
-            pipeline_result["stages"]["roll_number_extraction"] = stage3_result
-            
-            if not stage3_result["success"]:
-                pipeline_result["error_stage"] = "roll_number_extraction"
-                pipeline_result["error_message"] = stage3_result["error"]
-                return self._handle_pipeline_error(stage2_result["rotated_image_path"], output_folder, pipeline_result)
-            
-            # Stage 4: Process OMR sheet
-            print(f"[PIPELINE] Stage 4: Processing OMR sheet for {filename}")
-            stage4_result = self._stage4_process_omr_sheet(stage2_result["rotated_image_path"], stage3_result["roll_number"])
-            pipeline_result["stages"]["omr_processing"] = stage4_result
-            
-            if not stage4_result["success"]:
-                pipeline_result["error_stage"] = "omr_processing"
-                pipeline_result["error_message"] = stage4_result["error"]
-                return self._handle_pipeline_error(stage2_result["rotated_image_path"], output_folder, pipeline_result)
-            
-            # Stage 5: Upload to API
-            print(f"[PIPELINE] Stage 5: Uploading to API for {filename}")
-            stage5_result = self._stage5_upload_to_api(stage4_result["omr_data"], stage3_result["roll_number"])
-            pipeline_result["stages"]["api_upload"] = stage5_result
-            
-            if not stage5_result["success"]:
-                pipeline_result["error_stage"] = "api_upload"
-                pipeline_result["error_message"] = stage5_result["error"]
-                return self._handle_pipeline_error(stage2_result["rotated_image_path"], output_folder, pipeline_result)
-            
-            # All stages successful
-            pipeline_result["success"] = True
-            pipeline_result["output_path"] = stage2_result["rotated_image_path"]
-            pipeline_result["api_upload_success"] = True
-            
-            # Move to success folder
-            success_folder = os.path.join(output_folder, "success")
-            os.makedirs(success_folder, exist_ok=True)
-            
-            final_output_path = os.path.join(success_folder, f"{name_without_ext}_processed.jpg")
-            import shutil
-            shutil.copy2(stage2_result["rotated_image_path"], final_output_path)
-            pipeline_result["output_path"] = final_output_path
-            
-            print(f"[PIPELINE] ✅ All stages completed successfully for {filename}")
-            return pipeline_result
-            
-        except Exception as e:
-            pipeline_result["error_stage"] = "pipeline_exception"
-            pipeline_result["error_message"] = f"Unexpected error: {str(e)}"
-            return self._handle_pipeline_error(image_path, output_folder, pipeline_result)
-    
-    def _stage1_check_aruco_markers(self, image_path: str) -> Dict:
-        """Stage 1: Check if basic ArUco markers are present"""
-        try:
-            detected_ids, detection_info = self.detect_aruco_markers(image_path)
-            
-            if "error" in detection_info:
-                return {
-                    "success": False,
-                    "error": detection_info["error"],
-                    "detected_markers": []
-                }
-            
-            # Check if we have at least some markers (adjust threshold as needed)
-            min_required_markers = 5  # Minimum markers required
-            if len(detected_ids) < min_required_markers:
-                return {
-                    "success": False,
-                    "error": f"Insufficient ArUco markers found. Expected at least {min_required_markers}, found {len(detected_ids)}",
-                    "detected_markers": detected_ids
-                }
-            
+        if self.pipeline_manager is None:
             return {
-                "success": True,
-                "detected_markers": detected_ids,
-                "detection_info": detection_info
-            }
-            
-        except Exception as e:
-            return {
+                "filename": os.path.basename(image_path),
                 "success": False,
-                "error": f"ArUco detection failed: {str(e)}",
-                "detected_markers": []
+                "error_stage": "pipeline_initialization",
+                "error_message": "Pipeline manager not available",
+                "stages": {}
             }
-    
-    def _stage2_check_and_rotate_image(self, image_path: str) -> Dict:
-        """Stage 2: Check image orientation and rotate if needed"""
-        try:
-            # Read image
-            image = cv2.imread(image_path)
-            if image is None:
-                return {
-                    "success": False,
-                    "error": "Could not read image",
-                    "rotated_image_path": None
-                }
-            
-            # Convert to grayscale
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            
-            # Detect ArUco markers to determine orientation
-            if self.use_new_api:
-                corners, ids, rejected = self.aruco_detector.detectMarkers(gray)
-            else:
-                corners, ids, rejected = cv2.aruco.detectMarkers(
-                    gray, self.aruco_dict, parameters=self.aruco_params
-                )
-            
-            if ids is None or len(ids) == 0:
-                return {
-                    "success": False,
-                    "error": "No ArUco markers found for orientation detection",
-                    "rotated_image_path": None
-                }
-            
-            # Use marker positions to determine if rotation is needed
-            # This is a simple heuristic - you might want to improve this
-            rotation_needed = self._determine_rotation_needed(corners, ids)
-            
-            if rotation_needed != 0:
-                # Rotate image
-                height, width = image.shape[:2]
-                center = (width // 2, height // 2)
-                rotation_matrix = cv2.getRotationMatrix2D(center, rotation_needed, 1.0)
-                rotated_image = cv2.warpAffine(image, rotation_matrix, (width, height))
-                
-                # Save rotated image
-                rotated_path = os.path.splitext(image_path)[0] + "_rotated.jpg"
-                cv2.imwrite(rotated_path, rotated_image)
-                
-                return {
-                    "success": True,
-                    "rotation_applied": rotation_needed,
-                    "rotated_image_path": rotated_path
-                }
-            else:
-                return {
-                    "success": True,
-                    "rotation_applied": 0,
-                    "rotated_image_path": image_path
-                }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Orientation check failed: {str(e)}",
-                "rotated_image_path": None
-            }
-    
-    def _stage3_extract_roll_number(self, image_path: str) -> Dict:
-        """Stage 3: Extract exam roll number from image"""
-        try:
-            # Check if OCR is available
-            if not PYTESSERACT_AVAILABLE:
-                return {
-                    "success": False,
-                    "error": "OCR not available - pytesseract dependency issue",
-                    "roll_number": None
-                }
-            
-            # Extract text using OCR
-            extracted_text = self.extract_text_with_ocr(image_path)
-            
-            if extracted_text.startswith("OCR Error:"):
-                return {
-                    "success": False,
-                    "error": extracted_text,
-                    "roll_number": None
-                }
-            
-            # Parse roll number from extracted text
-            roll_number = self._parse_roll_number(extracted_text)
-            
-            if roll_number is None:
-                return {
-                    "success": False,
-                    "error": "Could not extract roll number from image",
-                    "extracted_text": extracted_text,
-                    "roll_number": None
-                }
-            
-            return {
-                "success": True,
-                "roll_number": roll_number,
-                "extracted_text": extracted_text
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Roll number extraction failed: {str(e)}",
-                "roll_number": None
-            }
-    
-    def _stage4_process_omr_sheet(self, image_path: str, roll_number: str) -> Dict:
-        """Stage 4: Process OMR sheet and extract answers"""
-        try:
-            # This is where you'd implement OMR-specific processing
-            # For now, we'll do basic ArUco detection and return structure
-            
-            detected_ids, detection_info = self.detect_aruco_markers(image_path)
-            
-            if "error" in detection_info:
-                return {
-                    "success": False,
-                    "error": detection_info["error"],
-                    "omr_data": None
-                }
-            
-            # Create OMR data structure
-            omr_data = {
-                "roll_number": roll_number,
-                "detected_markers": detected_ids,
-                "marker_positions": detection_info.get("marker_midpoints", []),
-                "processing_timestamp": str(datetime.now()),
-                "image_path": image_path
-            }
-            
-            return {
-                "success": True,
-                "omr_data": omr_data
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"OMR processing failed: {str(e)}",
-                "omr_data": None
-            }
-    
-    def _stage5_upload_to_api(self, omr_data: Dict, roll_number: str) -> Dict:
-        """Stage 5: Upload processed data to API"""
-        try:
-            # This is where you'd implement API upload
-            # For now, we'll simulate a successful upload
-            
-            # Simulate API call
-            api_response = self._simulate_api_upload(omr_data)
-            
-            if api_response["success"]:
-                return {
-                    "success": True,
-                    "api_response": api_response,
-                    "upload_id": api_response.get("upload_id")
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": api_response.get("error", "API upload failed"),
-                    "api_response": api_response
-                }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"API upload failed: {str(e)}",
-                "api_response": None
-            }
-    
-    def _handle_pipeline_error(self, image_path: str, output_folder: str, pipeline_result: Dict) -> Dict:
-        """Handle pipeline errors by marking image and moving to error folder"""
-        try:
-            # Create error folder
-            error_folder = os.path.join(output_folder, "error")
-            os.makedirs(error_folder, exist_ok=True)
-            
-            # Add red line to image to mark as error
-            error_image_path = self._mark_image_as_error(image_path, error_folder, pipeline_result)
-            
-            # Update pipeline result
-            pipeline_result["output_path"] = error_image_path
-            pipeline_result["error_image_path"] = error_image_path
-            
-            print(f"[PIPELINE] ❌ Error at stage '{pipeline_result['error_stage']}' for {pipeline_result['filename']}")
-            print(f"[PIPELINE] Error message: {pipeline_result['error_message']}")
-            
-            return pipeline_result
-            
-        except Exception as e:
-            print(f"[PIPELINE] Failed to handle error: {str(e)}")
-            return pipeline_result
-    
-    def _mark_image_as_error(self, image_path: str, error_folder: str, pipeline_result: Dict) -> str:
-        """Add red line to image and save to error folder"""
-        try:
-            # Read image
-            image = cv2.imread(image_path)
-            if image is None:
-                return image_path
-            
-            # Add red line across the image
-            height, width = image.shape[:2]
-            cv2.line(image, (0, height//2), (width, height//2), (0, 0, 255), 5)  # Red line
-            
-            # Add error text
-            error_text = f"ERROR: {pipeline_result['error_stage']}"
-            cv2.putText(image, error_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            
-            # Save to error folder
-            filename = os.path.basename(image_path)
-            name_without_ext = os.path.splitext(filename)[0]
-            error_image_path = os.path.join(error_folder, f"{name_without_ext}_ERROR.jpg")
-            cv2.imwrite(error_image_path, image)
-            
-            return error_image_path
-            
-        except Exception as e:
-            print(f"Failed to mark image as error: {str(e)}")
-            return image_path
-    
-    def _determine_rotation_needed(self, corners, ids) -> int:
-        """Determine if image needs rotation based on ArUco marker positions"""
-        # This is a simple heuristic - you might want to improve this
-        # For now, we'll assume no rotation is needed
-        return 0
-    
-    def _parse_roll_number(self, text: str) -> str:
-        """Parse roll number from OCR text"""
-        # This is a simple parser - you might want to improve this
-        # Look for patterns like "Roll No:", "Roll Number:", etc.
-        import re
         
-        # Common patterns for roll numbers
-        patterns = [
-            r'Roll\s*[Nn]o[.:]\s*(\d+)',
-            r'Roll\s*[Nn]umber[.:]\s*(\d+)',
-            r'(\d{6,10})',  # 6-10 digit number
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1)
-        
-        return None
+        return self.pipeline_manager.process_image(image_path, output_folder)
     
-    def _simulate_api_upload(self, omr_data: Dict) -> Dict:
-        """Simulate API upload - replace with actual API call"""
-        # Simulate network delay
-        import time
-        time.sleep(0.1)
+    def get_pipeline_stages_info(self) -> List[Dict[str, str]]:
+        """
+        Get information about all pipeline stages.
         
-        # Simulate successful upload
-        return {
-            "success": True,
-            "upload_id": f"upload_{int(time.time())}",
-            "message": "Data uploaded successfully"
-        }
+        Returns:
+            List of dictionaries with stage information
+        """
+        if self.pipeline_manager is None:
+            return []
+        return self.pipeline_manager.get_stages_info()
+    
+    def add_pipeline_stage(self, stage, position: Optional[int] = None) -> bool:
+        """
+        Add a new stage to the pipeline.
+        
+        Args:
+            stage: PipelineStage instance to add
+            position: Position to insert the stage (None for end)
+            
+        Returns:
+            True if stage was added successfully
+        """
+        if self.pipeline_manager is None:
+            return False
+        self.pipeline_manager.add_stage(stage, position)
+        return True
+    
+    def remove_pipeline_stage(self, stage_name: str) -> bool:
+        """
+        Remove a stage from the pipeline.
+        
+        Args:
+            stage_name: Name of the stage to remove
+            
+        Returns:
+            True if stage was removed, False if not found
+        """
+        if self.pipeline_manager is None:
+            return False
+        return self.pipeline_manager.remove_stage(stage_name)
+    
+    def get_pipeline_stage(self, stage_name: str):
+        """
+        Get a stage by name.
+        
+        Args:
+            stage_name: Name of the stage to retrieve
+            
+        Returns:
+            PipelineStage instance or None if not found
+        """
+        if self.pipeline_manager is None:
+            return None
+        return self.pipeline_manager.get_stage(stage_name)
+    
+
+    
+
+    
 
 
-def test_image_processor():
-    """Test function for the ImageProcessor class"""
-    processor = ImageProcessor()
-    
-    # Test with a sample image (replace with actual image path)
-    test_image = "test_image.jpg"
-    output_folder = "test_output"
-    
-    if os.path.exists(test_image):
-        result = processor.process_image(test_image, output_folder)
-        print("Processing Result:", result)
-    else:
-        print(f"Test image {test_image} not found")
 
 
-if __name__ == "__main__":
-    test_image_processor()

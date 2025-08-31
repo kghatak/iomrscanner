@@ -321,6 +321,9 @@ class PipelineProcessingWorker(QThread):
 
 
 class ResultsPanel(QWidget):
+    # Signal to notify when a folder is loaded
+    folder_loaded = pyqtSignal(str)
+    
     def __init__(self):
         super().__init__()
         self.current_folder = None
@@ -336,6 +339,9 @@ class ResultsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(10)
+        
+        # Auto-load default folder for development
+        QTimer.singleShot(100, self.load_default_folder)
         
         # Header
         header_frame = QFrame()
@@ -468,6 +474,10 @@ class ResultsPanel(QWidget):
         # Image Details Tab
         self.details_tab = self.create_details_tab()
         self.tab_widget.addTab(self.details_tab, "🖼️ Image Details")
+
+        # Uploaded Results Tab (initially hidden)
+        self.uploaded_results_tab = None
+        self.uploaded_results_tab_index = None
 
         # Add widgets to main layout
         layout.addWidget(header_frame)
@@ -1118,20 +1128,53 @@ class ResultsPanel(QWidget):
 
         QMessageBox.information(self, "Export Complete", f"Results exported to:\n{per_image_csv}\n{agg_csv}")
     
-    def analyze_folder(self, folder_path):
+    def load_default_folder(self):
+        """Load the default OMR_300DPI_pages folder for development."""
+        default_folder = "test_input_pdf/OMR_300DPI_pages"
+        
+        if os.path.exists(default_folder):
+            print(f"🚀 Auto-loading default folder: {default_folder}")
+            self.analyze_folder(default_folder, recursive=False)
+            # Emit signal to notify other components
+            self.folder_loaded.emit(default_folder)
+            # Update status to show default folder is loaded
+            if hasattr(self, 'aruco_status_label'):
+                self.aruco_status_label.setText(f"✅ Default folder loaded: {default_folder}")
+        else:
+            print(f"⚠️ Default folder not found: {default_folder}")
+            if hasattr(self, 'aruco_status_label'):
+                self.aruco_status_label.setText("⚠️ Default folder not found - please select a folder manually")
+    
+    def analyze_folder(self, folder_path, recursive=True):
         """Set the current folder, update the overview tab, and load all images in the left pane."""
         self.current_folder = folder_path
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
         image_files = []
         total_size = 0
         formats = set()
-        for root, dirs, files in os.walk(folder_path):
-            for file in files:
-                ext = os.path.splitext(file.lower())[1]
-                if ext in image_extensions:
-                    image_files.append(os.path.join(root, file))
-                    total_size += os.path.getsize(os.path.join(root, file))
-                    formats.add(ext)
+        
+        if recursive:
+            # Scan recursively (original behavior)
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    ext = os.path.splitext(file.lower())[1]
+                    if ext in image_extensions:
+                        image_files.append(os.path.join(root, file))
+                        total_size += os.path.getsize(os.path.join(root, file))
+                        formats.add(ext)
+        else:
+            # Scan only current directory (for default folder)
+            try:
+                for file in os.listdir(folder_path):
+                    file_path = os.path.join(folder_path, file)
+                    if os.path.isfile(file_path):
+                        ext = os.path.splitext(file.lower())[1]
+                        if ext in image_extensions:
+                            image_files.append(file_path)
+                            total_size += os.path.getsize(file_path)
+                            formats.add(ext)
+            except Exception as e:
+                print(f"Error scanning folder {folder_path}: {e}")
         num_images = len(image_files)
         avg_size = int(total_size / num_images) if num_images > 0 else 0
         self.total_images_label.setText(str(num_images))
@@ -1267,3 +1310,113 @@ class ResultsPanel(QWidget):
             f"📊 Total: {len(processed_files)}\n\n"
             f"Check the 'pipeline_processing_results' folder for detailed results."
         )
+
+    def create_uploaded_results_tab(self, results_data):
+        """Create the uploaded results tab with table display."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        
+        # Header frame
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            QFrame {
+                background-color: #e8f5e8;
+                border-radius: 8px;
+                padding: 15px;
+                border: 1px solid #c3e6c3;
+            }
+        """)
+        header_layout = QVBoxLayout(header_frame)
+        
+        # Title
+        title = QLabel("📊 Uploaded Results")
+        title.setFont(QFont("Arial", 16, QFont.Bold))
+        title.setStyleSheet("color: #2d5a2d;")
+        title.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(title)
+        
+        # Summary info
+        summary_label = QLabel(f"Total Records: {len(results_data)}")
+        summary_label.setFont(QFont("Arial", 12))
+        summary_label.setStyleSheet("color: #4a7c59;")
+        summary_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(summary_label)
+        
+        layout.addWidget(header_frame)
+        
+        # Table widget
+        self.uploaded_results_table = QTableWidget()
+        self.uploaded_results_table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                border: 1px solid #ddd;
+                gridline-color: #f0f0f0;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QTableWidget::item:selected {
+                background-color: #3f72af;
+                color: white;
+            }
+            QHeaderView::section {
+                background-color: #f8f9fa;
+                padding: 10px;
+                border: 1px solid #dee2e6;
+                font-weight: bold;
+            }
+        """)
+        
+        # Set up table
+        self.populate_uploaded_results_table(results_data)
+        
+        layout.addWidget(self.uploaded_results_table)
+        
+        return widget
+
+    def populate_uploaded_results_table(self, results_data):
+        """Populate the uploaded results table with data."""
+        if not results_data:
+            return
+        
+        # Get column headers from first row
+        headers = list(results_data[0].keys())
+        
+        # Set up table dimensions
+        self.uploaded_results_table.setRowCount(len(results_data))
+        self.uploaded_results_table.setColumnCount(len(headers))
+        self.uploaded_results_table.setHorizontalHeaderLabels(headers)
+        
+        # Populate data
+        for row_idx, row_data in enumerate(results_data):
+            for col_idx, header in enumerate(headers):
+                value = row_data.get(header, '')
+                item = QTableWidgetItem(str(value))
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+                self.uploaded_results_table.setItem(row_idx, col_idx, item)
+        
+        # Auto-resize columns
+        self.uploaded_results_table.resizeColumnsToContents()
+        
+        # Store the data for potential export
+        self.uploaded_results_data = results_data
+
+    def add_uploaded_results_tab(self, results_data):
+        """Add or update the uploaded results tab."""
+        # Remove existing tab if it exists
+        if self.uploaded_results_tab_index is not None:
+            self.tab_widget.removeTab(self.uploaded_results_tab_index)
+        
+        # Create new tab
+        self.uploaded_results_tab = self.create_uploaded_results_tab(results_data)
+        self.uploaded_results_tab_index = self.tab_widget.addTab(
+            self.uploaded_results_tab, 
+            "📊 Uploaded Results"
+        )
+
+    def show_uploaded_results_tab(self):
+        """Switch to the uploaded results tab."""
+        if self.uploaded_results_tab_index is not None:
+            self.tab_widget.setCurrentIndex(self.uploaded_results_tab_index)

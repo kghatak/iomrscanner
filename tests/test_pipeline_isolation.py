@@ -3,6 +3,9 @@
 Test script to demonstrate pipeline error isolation between images
 """
 
+import sys
+sys.path.append("..")  # Add parent directory to path
+
 import os
 import sys
 from image_processor import ImageProcessor

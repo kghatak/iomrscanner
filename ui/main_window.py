@@ -70,6 +70,9 @@ class MainWindow(QMainWindow):
         self.folder_selected.connect(self.results_panel.analyze_folder)
         self.image_panel.image_selected.connect(self.results_panel.show_image_details)
         
+        # Connect results panel folder loading to image panel
+        self.results_panel.folder_loaded.connect(self.image_panel.load_folder)
+        
     def create_menu(self):
         menubar = self.menuBar()
         
@@ -88,6 +91,12 @@ class MainWindow(QMainWindow):
         open_pdf_action.setStatusTip('Open a PDF and extract images from pages')
         open_pdf_action.triggered.connect(self.open_pdf_and_extract_images)
         file_menu.addAction(open_pdf_action)
+        
+        # Upload Result action
+        upload_result_action = QAction('Upload Result', self)
+        upload_result_action.setStatusTip('Upload CSV result file with exam data')
+        upload_result_action.triggered.connect(self.upload_result_csv)
+        file_menu.addAction(upload_result_action)
         
         file_menu.addSeparator()
         
@@ -189,6 +198,65 @@ class MainWindow(QMainWindow):
                 self.image_panel.load_folder(output_folder)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to extract images: {e}")
+
+    def upload_result_csv(self):
+        """Upload CSV result file and display in new tab."""
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+        import csv
+        import os
+        
+        # Open file dialog for CSV selection
+        csv_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select CSV Result File", 
+            "", 
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not csv_path:
+            return
+        
+        try:
+            # Read CSV file
+            results_data = []
+            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                
+                # Validate required columns
+                required_columns = ['examname', 'class', 'questionIndex', 'correctchoice', 'questiontype']
+                if not all(col in reader.fieldnames for col in required_columns):
+                    missing_cols = [col for col in required_columns if col not in reader.fieldnames]
+                    QMessageBox.warning(
+                        self, 
+                        "Invalid CSV Format", 
+                        f"Missing required columns: {', '.join(missing_cols)}\n\n"
+                        f"Required format: examname, class, questionIndex, correctchoice, questiontype"
+                    )
+                    return
+                
+                # Read all rows
+                for row in reader:
+                    results_data.append(row)
+            
+            if not results_data:
+                QMessageBox.warning(self, "Empty File", "The CSV file contains no data.")
+                return
+            
+            # Add uploaded results to the results panel
+            self.results_panel.add_uploaded_results_tab(results_data)
+            
+            # Show success message
+            QMessageBox.information(
+                self, 
+                "Upload Successful", 
+                f"Successfully uploaded {len(results_data)} result records from {os.path.basename(csv_path)}"
+            )
+            
+            # Switch to the uploaded results tab
+            self.results_panel.show_uploaded_results_tab()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to upload CSV file: {str(e)}")
 
     def resizeEvent(self, event):
         """Handle window resize to maintain image panel proportions"""

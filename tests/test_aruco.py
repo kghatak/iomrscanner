@@ -3,6 +3,9 @@
 Test script for ArUco marker detection and image processing
 """
 
+import sys
+sys.path.append("..")  # Add parent directory to path
+
 import cv2
 import numpy as np
 import os
@@ -77,3 +80,57 @@ def create_test_aruco_image(output_path, marker_ids=[1, 2, 3, 4, 5, 6, 7, 8, 9, 
     # Save image
     cv2.imwrite(output_path, image)
     print(f"Created test image: {output_path}")
+
+def test_aruco_processing():
+    """Test the ArUco processing functionality"""
+    print("Testing ArUco marker detection and processing...")
+    
+    # Create test directory
+    test_dir = "test_images"
+    os.makedirs(test_dir, exist_ok=True)
+    
+    # Create test images
+    create_test_aruco_image(f"{test_dir}/complete_markers.jpg", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])  # All 10 markers
+    create_test_aruco_image(f"{test_dir}/missing_markers.jpg", [1, 2, 3, 4])  # Missing markers 5-9
+    create_test_aruco_image(f"{test_dir}/partial_markers.jpg", [1, 2, 4, 6, 8])  # 5 out of 10 markers
+    create_test_aruco_image(f"{test_dir}/no_markers.jpg", [])  # No markers
+    
+    # Test image processor
+    processor = ImageProcessor()
+    #processor.set_expected_markers([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])  # Expecting 10 markers
+    
+    # Test each image
+    test_images = [
+        f"{test_dir}/complete_markers.jpg",
+        f"{test_dir}/missing_markers.jpg", 
+        f"{test_dir}/partial_markers.jpg",
+        f"{test_dir}/no_markers.jpg"
+    ]
+
+    # Test each image
+    expected_markers = [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [1, 2, 3, 4], 
+        [1, 2, 4, 6, 8],
+        []
+    ]
+    
+    output_folder = "test_output"
+    
+    for image_path in test_images:
+        if os.path.exists(image_path):
+            print(f"### Processing: {image_path}")
+            # Set expected markers based on the test image
+            index = test_images.index(image_path)
+            processor.set_expected_markers(expected_markers[index])
+            result = processor.process_image(image_path, output_folder)
+            
+            print(f"  Success: {result['success']}")
+            print(f"  Detected markers: {result['detection_info'].get('detected_ids', [])}")
+            print(f"  Missing markers: {result['detection_info'].get('missing_ids', [])}")
+            print(f"  Output: {result['output_path']}")
+    
+    print(f"Test completed! Check the '{output_folder}' directory for results.")
+
+if __name__ == "__main__":
+    test_aruco_processing()

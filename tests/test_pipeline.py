@@ -3,6 +3,9 @@
 Test script for the comprehensive image processing pipeline
 """
 
+import sys
+sys.path.append("..")  # Add parent directory to path
+
 import os
 import sys
 from image_processor import ImageProcessor

@@ -3,6 +3,9 @@
 Test the pipeline with a single image that has a roll number
 """
 
+import sys
+sys.path.append("..")  # Add parent directory to path
+
 import os
 from image_processor import ImageProcessor
 
