@@ -21,8 +21,33 @@ class MainWindow(QMainWindow):
             }
         """)
         
+        # Set window icon
+        self.set_app_icon()
+        
         self.init_ui()
         self.create_menu()
+    
+    def set_app_icon(self):
+        """Set the application window icon"""
+        try:
+            import os
+            # Get the icon path (relative to this file)
+            icon_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), 
+                'assets', 
+                'app_icon.png'
+            )
+            
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                self.setWindowIcon(icon)
+                # Also set for all windows
+                from PyQt5.QtWidgets import QApplication
+                QApplication.setWindowIcon(icon)
+            else:
+                print(f"Warning: Icon not found at {icon_path}")
+        except Exception as e:
+            print(f"Warning: Could not set app icon: {e}")
         
     def init_ui(self):
         # Central widget with splitter
@@ -122,6 +147,15 @@ class MainWindow(QMainWindow):
         refresh_action.setStatusTip('Refresh current folder')
         refresh_action.triggered.connect(self.refresh_current_folder)
         view_menu.addAction(refresh_action)
+        
+        # Tools menu
+        tools_menu = menubar.addMenu('&Tools')
+        
+        # ML Dataset Review action
+        review_action = QAction('🔍 Review ML Dataset Labels', self)
+        review_action.setStatusTip('Open manual review tool for ML dataset labels')
+        review_action.triggered.connect(self.open_review_tool)
+        tools_menu.addAction(review_action)
         
         # Help menu
         help_menu = menubar.addMenu('&Help')
@@ -258,6 +292,54 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to upload CSV file: {str(e)}")
 
+    def open_review_tool(self):
+        """Open the ML Dataset Manual Review Tool as a popup window"""
+        try:
+            # Try to import the review tool
+            import sys
+            import os
+            
+            # Add tools directory to path if not already there
+            tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools')
+            if tools_dir not in sys.path:
+                sys.path.insert(0, tools_dir)
+            
+            # Check if pandas is available
+            try:
+                import pandas as pd
+            except (ImportError, ValueError) as e:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "Missing Dependency",
+                    "The ML Dataset Review Tool requires pandas.\n\n"
+                    "To fix this issue:\n"
+                    "1. Run: ./setup_fresh_env.sh\n"
+                    "2. Activate: source venv/bin/activate\n"
+                    "3. Restart the application\n\n"
+                    f"Error: {str(e)[:100]}"
+                )
+                return
+            
+            # Import and create review tool window
+            from manual_review_tool import CircleReviewTool
+            
+            # Create review tool as a separate window (not modal)
+            self.review_window = CircleReviewTool()
+            self.review_window.show()
+            
+            self.statusBar().showMessage('Opened ML Dataset Review Tool')
+            
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open review tool:\n{str(e)}\n\n"
+                f"Make sure pandas is installed:\n"
+                f"./setup_fresh_env.sh"
+            )
+    
     def resizeEvent(self, event):
         """Handle window resize to maintain image panel proportions"""
         super().resizeEvent(event)

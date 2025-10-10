@@ -57,6 +57,13 @@ class ImageProcessor:
         # Initialize as False by default
         self.opencv_initialized = False
         
+        # Store module-level availability flags as instance variables
+        self.OPENCV_AVAILABLE = OPENCV_AVAILABLE
+        self.NUMPY_AVAILABLE = NUMPY_AVAILABLE
+        self.PYTESSERACT_AVAILABLE = PYTESSERACT_AVAILABLE
+        self.ALL_DEPENDENCIES_AVAILABLE = ALL_DEPENDENCIES_AVAILABLE
+        self.ARUCO_DEPENDENCIES_AVAILABLE = ARUCO_DEPENDENCIES_AVAILABLE
+        
         print(f"[DEBUG] Initializing ImageProcessor...")
         print(f"[DEBUG] ALL_DEPENDENCIES_AVAILABLE: {ALL_DEPENDENCIES_AVAILABLE}")
         print(f"[DEBUG] OPENCV_AVAILABLE: {OPENCV_AVAILABLE}")

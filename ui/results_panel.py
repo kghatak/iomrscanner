@@ -61,28 +61,30 @@ class ArUcoProcessingWorker(QThread):
             self.status_message.emit(f"🎯 Setting expected ArUco markers: {self.expected_markers}")
             self.processor.set_expected_markers(self.expected_markers)
             
-            # Create output directories
+            # Create success and failure folders directly in source folder
             self.status_message.emit("📁 Creating output directories...")
-            results_folder = os.path.join(self.output_folder, "results")
-            os.makedirs(results_folder, exist_ok=True)
-            self.status_message.emit(f"📁 Results folder: {results_folder}")
             # Create success and failure folders
-            success_folder = os.path.join(results_folder, "success")
-            failure_folder = os.path.join(results_folder, "failure")
+            success_folder = os.path.join(self.source_folder, "success")
+            failure_folder = os.path.join(self.source_folder, "failure")
             os.makedirs(success_folder, exist_ok=True)
             os.makedirs(failure_folder, exist_ok=True)
             self.status_message.emit(f"📁 Success folder: {success_folder}")
             self.status_message.emit(f"📁 Failure folder: {failure_folder}")
             
-            # Get all image files
-            self.status_message.emit("🔍 Scanning for image files...")
+            # Get all image files (top-level only, no subdirectories)
+            self.status_message.emit("🔍 Scanning for image files (top-level only)...")
             image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
             image_files = []
             
-            for root, dirs, files in os.walk(self.source_folder):
-                for file in files:
-                    if os.path.splitext(file.lower())[1] in image_extensions:
-                        image_files.append(os.path.join(root, file))
+            # Only scan top-level directory
+            try:
+                for file in os.listdir(self.source_folder):
+                    file_path = os.path.join(self.source_folder, file)
+                    if os.path.isfile(file_path):
+                        if os.path.splitext(file.lower())[1] in image_extensions:
+                            image_files.append(file_path)
+            except Exception as e:
+                self.status_message.emit(f"⚠️ Error scanning folder: {str(e)}")
             
             total_files = len(image_files)
             self.status_message.emit(f"📊 Found {total_files} image files to process")
@@ -207,29 +209,32 @@ class PipelineProcessingWorker(QThread):
             self.status_message.emit(f"🎯 Setting expected ArUco markers: {self.expected_markers}")
             self.processor.set_expected_markers(self.expected_markers)
             
-            # Create output directories
-            self.status_message.emit("📁 Creating output directories...")
-            results_folder = os.path.join(self.output_folder, "pipeline_results")
-            os.makedirs(results_folder, exist_ok=True)
-            self.status_message.emit(f"📁 Results folder: {results_folder}")
+            # Use the source folder directly for success/error folders
+            # No need for nested pipeline_results structure
+            self.status_message.emit("📁 Using source folder for output...")
             
-            # Create success and error folders
-            success_folder = os.path.join(results_folder, "success")
-            error_folder = os.path.join(results_folder, "error")
+            # Create success and error folders directly in source folder
+            success_folder = os.path.join(self.source_folder, "success")
+            error_folder = os.path.join(self.source_folder, "error")
             os.makedirs(success_folder, exist_ok=True)
             os.makedirs(error_folder, exist_ok=True)
             self.status_message.emit(f"📁 Success folder: {success_folder}")
             self.status_message.emit(f"📁 Error folder: {error_folder}")
             
-            # Get all image files
-            self.status_message.emit("🔍 Scanning for image files...")
+            # Get all image files (top-level only, no subdirectories)
+            self.status_message.emit("🔍 Scanning for image files (top-level only)...")
             image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
             image_files = []
             
-            for root, dirs, files in os.walk(self.source_folder):
-                for file in files:
-                    if os.path.splitext(file.lower())[1] in image_extensions:
-                        image_files.append(os.path.join(root, file))
+            # Only scan top-level directory
+            try:
+                for file in os.listdir(self.source_folder):
+                    file_path = os.path.join(self.source_folder, file)
+                    if os.path.isfile(file_path):
+                        if os.path.splitext(file.lower())[1] in image_extensions:
+                            image_files.append(file_path)
+            except Exception as e:
+                self.status_message.emit(f"⚠️ Error scanning folder: {str(e)}")
             
             total_files = len(image_files)
             self.status_message.emit(f"📊 Found {total_files} image files to process")
@@ -262,7 +267,7 @@ class PipelineProcessingWorker(QThread):
                 
                 # Process image through the comprehensive pipeline
                 self.status_message.emit(f"🔧 Running pipeline for {filename}...")
-                result = self.processor.process_image_pipeline(image_path, results_folder)
+                result = self.processor.process_image_pipeline(image_path, self.source_folder)
                 
                 # Log pipeline results
                 if result['success']:
@@ -739,6 +744,19 @@ class ResultsPanel(QWidget):
         
         layout.addWidget(pipeline_group)
         
+        # Thumbnail Viewers Section
+        from .thumbnail_viewer import ThumbnailViewer
+        
+        # Success thumbnails
+        self.success_thumbnail_viewer = ThumbnailViewer("✅ Success Results", "#28a745")
+        self.success_thumbnail_viewer.thumbnail_clicked.connect(self.show_image_popup)
+        layout.addWidget(self.success_thumbnail_viewer)
+        
+        # Error thumbnails
+        self.error_thumbnail_viewer = ThumbnailViewer("❌ Error Results", "#dc3545")
+        self.error_thumbnail_viewer.thumbnail_clicked.connect(self.show_image_popup)
+        layout.addWidget(self.error_thumbnail_viewer)
+        
         # Processing Status Section
         status_group = QGroupBox("📊 Processing Status")
         status_group.setStyleSheet("""
@@ -940,10 +958,7 @@ class ResultsPanel(QWidget):
                               "Please select at least one expected ArUco marker.")
             return
         
-        # Create output folder for pipeline results
-        output_folder = os.path.join(self.current_folder, "pipeline_processing_results")
-        os.makedirs(output_folder, exist_ok=True)
-        
+        # Use current folder directly for output (success/error created there)
         # Update UI
         self.process_pipeline_button.setEnabled(False)
         self.process_aruco_button.setEnabled(False)  # Disable both buttons
@@ -952,9 +967,9 @@ class ResultsPanel(QWidget):
         self.aruco_status_label.setText("Starting pipeline processing...")
         self.aruco_results_text.clear()
         
-        # Start pipeline processing thread
+        # Start pipeline processing thread - use current_folder as output folder
         self.pipeline_worker = PipelineProcessingWorker(
-            self.current_folder, output_folder, expected_markers
+            self.current_folder, self.current_folder, expected_markers
         )
         self.pipeline_worker.progress_updated.connect(self.update_aruco_progress)
         self.pipeline_worker.file_processed.connect(self.on_pipeline_file_processed)
@@ -1148,6 +1163,10 @@ class ResultsPanel(QWidget):
     def analyze_folder(self, folder_path, recursive=True):
         """Set the current folder, update the overview tab, and load all images in the left pane."""
         self.current_folder = folder_path
+        
+        # Clear thumbnail viewers when folder changes
+        self.clear_thumbnail_viewers()
+        
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
         image_files = []
         total_size = 0
@@ -1300,6 +1319,9 @@ class ResultsPanel(QWidget):
         self.aruco_status_label.setText(results.get('message', 'Pipeline processing complete.'))
         self.aruco_results_text.append(f"\n🎉 Pipeline processing complete: {success_count} success, {failure_count} failure")
         
+        # Refresh thumbnail viewers
+        self.refresh_thumbnail_viewers()
+        
         # Show summary dialog
         QMessageBox.information(
             self, 
@@ -1308,7 +1330,7 @@ class ResultsPanel(QWidget):
             f"✅ Successful: {success_count}\n"
             f"❌ Failed: {failure_count}\n"
             f"📊 Total: {len(processed_files)}\n\n"
-            f"Check the 'pipeline_processing_results' folder for detailed results."
+            f"Check the 'success' and 'error' folders for results."
         )
 
     def create_uploaded_results_tab(self, results_data):
@@ -1420,3 +1442,74 @@ class ResultsPanel(QWidget):
         """Switch to the uploaded results tab."""
         if self.uploaded_results_tab_index is not None:
             self.tab_widget.setCurrentIndex(self.uploaded_results_tab_index)
+    
+    def refresh_thumbnail_viewers(self):
+        """Refresh thumbnails in success and error folders"""
+        if not self.current_folder:
+            print(f"[ResultsPanel] refresh_thumbnail_viewers: No current folder set")
+            return
+        
+        success_folder = os.path.join(self.current_folder, "success")
+        error_folder = os.path.join(self.current_folder, "error")
+        
+        print(f"[ResultsPanel] refresh_thumbnail_viewers called")
+        print(f"[ResultsPanel]   Current folder: {self.current_folder}")
+        print(f"[ResultsPanel]   Success folder: {success_folder}")
+        print(f"[ResultsPanel]   Error folder: {error_folder}")
+        print(f"[ResultsPanel]   Success exists: {os.path.exists(success_folder)}")
+        print(f"[ResultsPanel]   Error exists: {os.path.exists(error_folder)}")
+        
+        # Load success thumbnails
+        if os.path.exists(success_folder):
+            try:
+                self.success_thumbnail_viewer.load_thumbnails(success_folder)
+                print(f"[ResultsPanel] Loaded {len(self.success_thumbnail_viewer.thumbnails)} success thumbnails")
+            except Exception as e:
+                print(f"[ResultsPanel] Error loading success thumbnails: {e}")
+        else:
+            print(f"[ResultsPanel] Success folder does not exist")
+        
+        # Load error thumbnails
+        if os.path.exists(error_folder):
+            try:
+                self.error_thumbnail_viewer.load_thumbnails(error_folder)
+                print(f"[ResultsPanel] Loaded {len(self.error_thumbnail_viewer.thumbnails)} error thumbnails")
+            except Exception as e:
+                print(f"[ResultsPanel] Error loading error thumbnails: {e}")
+        else:
+            print(f"[ResultsPanel] Error folder does not exist")
+    
+    def clear_thumbnail_viewers(self):
+        """Clear all thumbnails (called when folder changes)"""
+        self.success_thumbnail_viewer.clear_thumbnails()
+        self.error_thumbnail_viewer.clear_thumbnails()
+        print(f"[ResultsPanel] Cleared thumbnail viewers")
+    
+    def show_image_popup(self, image_path):
+        """Show image in popup dialog with rerun option"""
+        from .thumbnail_viewer import ImagePopupDialog
+        
+        popup = ImagePopupDialog(image_path, self)
+        popup.rerun_requested.connect(self.handle_rerun_request)
+        popup.exec_()
+    
+    def handle_rerun_request(self, image_path):
+        """Handle rerun request for a specific image"""
+        # Extract original image path from success/error path
+        # The filename might be roll_number.png in success/error folder
+        # Need to find the original image in the main folder
+        
+        filename = os.path.basename(image_path)
+        
+        # Check if this is a roll number filename or original filename
+        # For now, show message that rerun is requested
+        QMessageBox.information(
+            self,
+            "Rerun Pipeline",
+            f"Rerun requested for: {filename}\n\n"
+            "To rerun a specific file:\n"
+            "1. Locate the original image in the main folder\n"
+            "2. Select it from the image list\n"
+            "3. Run pipeline processing\n\n"
+            "Note: Automatic single-file rerun will be added in future version."
+        )
