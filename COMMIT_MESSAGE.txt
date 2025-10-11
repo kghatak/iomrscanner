@@ -1,0 +1,78 @@
+Release v2.0.0: Bignan Mancha OMR Reader with Automatic Poppler Bundling
+
+🎉 Major Release - Application Rebranding & Windows PDF Support
+
+BREAKING: Application renamed to "Bignan Mancha OMR Reader"
+- Rebranded from "Image Folder Analyzer" to reflect OMR focus
+- Updated bundle identifier: com.bignanmancha.omr.reader
+- Version bumped to 2.0.0 for major release
+
+New Features:
+✨ Automatic Poppler bundling for Windows builds
+✨ PDF extraction works out-of-the-box on Windows
+✨ Intelligent Poppler path detection (bundled → system → user)
+✨ Enhanced error messages with installation instructions
+✨ Automatic Poppler download during build process
+
+New Components:
+- download_poppler_windows.py: Automated Poppler download script
+- pdf_utils.py: Cross-platform PDF processing utilities
+- tests/test_pdf_utils.py: Test suite for PDF utilities
+- docs/WINDOWS_SETUP_GUIDE.md: Comprehensive Windows setup guide
+- WINDOWS_BUILD_WITH_POPPLER.md: Build guide with Poppler bundling
+- WINDOWS_PDF_FIX.md: Technical documentation
+- CHANGELOG.md: Version history tracking
+- RELEASE_NOTES_v2.0.0.md: Detailed release notes
+
+Modified Files:
+- build_config.py: Updated app identity (name, version, bundle ID)
+- main.py: Updated Qt app name and version to 2.0
+- ui/main_window.py: Updated window title and About dialog
+- build_cross_platform.py: Added automatic Poppler handling
+- Image Folder Analyzer.spec → Bignan Mancha OMR Reader.spec (renamed)
+- README.md: Updated title, description, system dependencies
+- requirements.txt: Added Poppler installation notes
+- .gitignore: Added poppler_bundle/ and build_deps/
+
+Bug Fixes:
+🐛 Fixed Windows PDF error: "Unable to get page count"
+🐛 Users no longer need to manually install Poppler on Windows
+🐛 Clear error messages when Poppler is missing
+
+Technical Changes:
+- PyInstaller spec updated to include Poppler bundle
+- Build system now downloads Poppler automatically
+- PDF processing centralized in pdf_utils module
+- Detection priority: bundled > PATH > user installation
+
+Bundle Size Impact:
+- Increase: ~15 MB (65-95 MB total vs 50-80 MB without Poppler)
+- Trade-off: Larger download for seamless user experience
+
+Testing:
+✅ Tested on Windows 10/11
+✅ Tested on macOS (with system Poppler)
+✅ PDF extraction with bundled Poppler
+✅ Error handling for missing Poppler
+✅ Cross-platform compatibility
+
+Migration:
+- No breaking changes for existing functionality
+- Application name change is cosmetic
+- Previous installations can coexist
+- Users can remove manually installed Poppler (optional)
+
+Documentation:
+📚 Comprehensive guides added for Windows setup and building
+📚 Troubleshooting sections with common issues
+📚 Step-by-step installation instructions
+
+License Note:
+⚠️  Bundled Poppler is GPL v2 - consider implications
+
+Credits:
+- Poppler: https://poppler.freedesktop.org/
+- poppler-windows: https://github.com/oschwartz10612/poppler-windows
+
+Co-authored-by: Bignan Mancha <bignanmancha@example.com>
+

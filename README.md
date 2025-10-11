@@ -1,6 +1,6 @@
-# 📁 Image Folder Analyzer
+# 📝 Bignan Mancha OMR Reader
 
-A modern PyQt5 desktop application for analyzing OMR sheets folders with professional cross-platform build support.
+A modern PyQt5 desktop application for processing and analyzing OMR (Optical Mark Recognition) sheets with professional cross-platform build support.
 
 ## ✨ Features
 
@@ -30,14 +30,18 @@ A modern PyQt5 desktop application for analyzing OMR sheets folders with profess
    pip install -r requirements.txt
    ```
 
-4. **Run the application**
+4. **Install system dependencies** (see System Dependencies section below)
+
+5. **Run the application**
    ```bash
    python main.py
    ```
-4.1 **Run the application witn venv activate**
-   ```
+   Or with venv activate:
+   ```bash
    source qt_env1/bin/activate && python main.py
    ```
+
+> **Windows Users:** See [docs/WINDOWS_SETUP_GUIDE.md](docs/WINDOWS_SETUP_GUIDE.md) for detailed setup instructions including Poppler installation.
 
 ## 📦 Building Installers
 
@@ -80,6 +84,23 @@ For detailed build instructions, see [BUILD_GUIDE.md](BUILD_GUIDE.md)
 - PyQt5
 - Pillow (PIL)
 
+### System Dependencies
+
+Some features require additional system-level dependencies:
+
+#### **Tesseract OCR** (for OCR functionality)
+- **Windows**: Download from [UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
+- **macOS**: `brew install tesseract`
+- **Linux**: `sudo apt-get install tesseract-ocr`
+
+#### **Poppler** (for PDF processing)
+- **Windows**: 
+  1. Download from [poppler-windows releases](https://github.com/oschwartz10612/poppler-windows/releases/)
+  2. Extract to `C:\Program Files\poppler` or `C:\poppler`
+  3. Add the `bin` folder to your system PATH
+- **macOS**: `brew install poppler`
+- **Linux**: `sudo apt-get install poppler-utils`
+
 ### Running in Development
 ```bash
 source qt_env/bin/activate
@@ -118,4 +139,4 @@ MIT License - see [LICENSE.txt](LICENSE.txt) for details.
 
 ---
 
-Built with ❤️ using PyQt5
+Bignan Mancha OMR Reader - Built with ❤️ using PyQt5

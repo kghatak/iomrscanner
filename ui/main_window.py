@@ -13,7 +13,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Image Folder Analyzer")
+        self.setWindowTitle("Bignan Mancha OMR Reader")
         self.setGeometry(100, 100, 1200, 800)
         self.setStyleSheet("""
             QMainWindow {
@@ -199,39 +199,78 @@ class MainWindow(QMainWindow):
         from PyQt5.QtWidgets import QMessageBox
         QMessageBox.about(
             self,
-            "About Image Folder Analyzer",
-            "Image Folder Analyzer v1.0\n\n"
-            "A tool for analyzing and viewing images in folders.\n"
-            "Built with PyQt5."
+            "About Bignan Mancha OMR Reader",
+            "Bignan Mancha OMR Reader v2.0\n\n"
+            "OMR (Optical Mark Recognition) sheet processing and analysis tool.\n"
+            "Built with PyQt5.\n\n"
+            "What's New in v2.0:\n"
+            "• Automatic Poppler bundling for Windows\n"
+            "• PDF extraction works out of the box\n"
+            "• Improved error handling and messages"
         )
         
     def open_pdf_and_extract_images(self):
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
-        try:
-            from pdf2image import convert_from_path
-        except ImportError:
-            QMessageBox.critical(self, "Missing Dependency", "Please install pdf2image and poppler-utils (brew install poppler)")
-            return
         import os
+        
+        # Import the PDF utilities module
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from pdf_utils import convert_pdf_with_poppler, get_poppler_install_instructions
+        
         pdf_path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
         if not pdf_path:
             return
+        
         output_folder = os.path.splitext(pdf_path)[0] + "_pages"
         os.makedirs(output_folder, exist_ok=True)
+        
         try:
-            images = convert_from_path(pdf_path)
+            # Use the utility function that handles Poppler detection
+            images = convert_pdf_with_poppler(pdf_path)
+            
             image_paths = []
             for i, img in enumerate(images):
                 img_path = os.path.join(output_folder, f"page_{i+1}.png")
                 img.save(img_path, "PNG")
                 image_paths.append(img_path)
-            QMessageBox.information(self, "PDF Extracted", f"Extracted {len(image_paths)} images to {output_folder}")
+            
+            QMessageBox.information(
+                self, 
+                "PDF Extracted", 
+                f"Extracted {len(image_paths)} images to {output_folder}"
+            )
+            
             # Load these images into the side panel and image panel
             self.results_panel.analyze_folder(output_folder)
             if hasattr(self, 'image_panel'):
                 self.image_panel.load_folder(output_folder)
+                
+        except ImportError as e:
+            QMessageBox.critical(
+                self, 
+                "Missing Dependency", 
+                "Please install pdf2image:\n\npip install pdf2image\n\n"
+                "Also ensure Poppler is installed:\n\n" + get_poppler_install_instructions()
+            )
+        except RuntimeError as e:
+            # Poppler not found error
+            QMessageBox.critical(self, "Poppler Not Found", str(e))
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to extract images: {e}")
+            error_details = str(e)
+            if "Unable to get page count" in error_details or "poppler" in error_details.lower():
+                error_msg = (
+                    f"Failed to extract images: {error_details}\n\n"
+                    "This error typically means Poppler is not properly installed or configured.\n\n"
+                    "Please ensure:\n"
+                    "1. Poppler is installed on your system\n"
+                    "2. The 'bin' folder is in your system PATH\n"
+                    "3. You have restarted the application after installing Poppler\n\n"
+                    + get_poppler_install_instructions()
+                )
+                QMessageBox.critical(self, "PDF Extraction Error", error_msg)
+            else:
+                QMessageBox.critical(self, "Error", f"Failed to extract images: {error_details}")
 
     def upload_result_csv(self):
         """Upload CSV result file and display in new tab."""

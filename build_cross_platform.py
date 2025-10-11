@@ -53,9 +53,50 @@ def install_dependencies():
         else:
             run_command(f"pip install {dep}")
 
+def download_poppler_for_windows():
+    """Download Poppler for Windows bundling"""
+    if CURRENT_OS != 'windows':
+        return True
+    
+    print("[BUILD] Checking for Poppler bundle...")
+    
+    # Check if poppler_bundle already exists
+    if os.path.exists('poppler_bundle'):
+        print("✅ Poppler bundle found")
+        return True
+    
+    print("⚠️  Poppler bundle not found. Downloading...")
+    print("[INFO] This is a one-time download (~15 MB)")
+    
+    try:
+        # Run the download script
+        run_command(f'{sys.executable} download_poppler_windows.py')
+        
+        if os.path.exists('poppler_bundle'):
+            print("✅ Poppler downloaded and ready for bundling")
+            return True
+        else:
+            print("❌ Poppler download failed")
+            return False
+    except Exception as e:
+        print(f"❌ Error downloading Poppler: {e}")
+        print("[INFO] You can manually download Poppler by running:")
+        print(f"      {sys.executable} download_poppler_windows.py")
+        return False
+
 def create_app_bundle():
     """Create the application bundle using PyInstaller"""
     print(f"[BUILD] Creating {CURRENT_OS} app bundle with PyInstaller...")
+    
+    # Download Poppler for Windows if needed
+    if CURRENT_OS == 'windows':
+        if not download_poppler_for_windows():
+            print("⚠️  Warning: Building without bundled Poppler")
+            print("    Users will need to install Poppler separately")
+            response = input("Continue without bundled Poppler? (y/n): ")
+            if response.lower() != 'y':
+                print("[CANCELLED] Build cancelled by user")
+                sys.exit(1)
     
     # Clean previous builds
     if os.path.exists('dist'):
@@ -63,36 +104,46 @@ def create_app_bundle():
     if os.path.exists('build'):
         shutil.rmtree('build')
     
-    # Build PyInstaller command
-    cmd_parts = [
-        'pyinstaller',
-        '--windowed',  # No console
-        '--onedir',    # Create a bundle
-        '--clean',
-        '--noconfirm',
-        f'--name="{APP_NAME}"',
-        '--add-data=ui:ui',  # Include UI package
-    ]
+    # Check if spec file exists
+    spec_file = f"{APP_NAME}.spec"
+    use_spec = os.path.exists(spec_file)
     
-    # Add platform-specific icon
-    icon_path = CURRENT_PLATFORM['icon']
-    if os.path.exists(icon_path):
-        cmd_parts.append(f'--icon={icon_path}')
+    if use_spec:
+        print(f"[BUILD] Using existing spec file: {spec_file}")
+        cmd = f'pyinstaller --clean --noconfirm "{spec_file}"'
+        run_command(cmd)
     else:
-        print(f"[WARNING] Icon file not found: {icon_path}")
-        print("[INFO] Continuing build without custom icon")
-    
-    # Platform-specific options
-    if CURRENT_OS == 'windows':
-        cmd_parts.append('--noconsole')  # Extra Windows option
-    elif CURRENT_OS == 'darwin':
-        cmd_parts.append(f'--osx-bundle-identifier={APP_NAME.lower().replace(" ", ".")}.app')
-    
-    # Add the main script
-    cmd_parts.append('main.py')
-    
-    cmd = ' '.join(cmd_parts)
-    run_command(cmd)
+        print("[BUILD] No spec file found, using command-line options")
+        # Build PyInstaller command
+        cmd_parts = [
+            'pyinstaller',
+            '--windowed',  # No console
+            '--onedir',    # Create a bundle
+            '--clean',
+            '--noconfirm',
+            f'--name="{APP_NAME}"',
+            '--add-data=ui:ui',  # Include UI package
+        ]
+        
+        # Add platform-specific icon
+        icon_path = CURRENT_PLATFORM['icon']
+        if os.path.exists(icon_path):
+            cmd_parts.append(f'--icon={icon_path}')
+        else:
+            print(f"[WARNING] Icon file not found: {icon_path}")
+            print("[INFO] Continuing build without custom icon")
+        
+        # Platform-specific options
+        if CURRENT_OS == 'windows':
+            cmd_parts.append('--noconsole')  # Extra Windows option
+        elif CURRENT_OS == 'darwin':
+            cmd_parts.append(f'--osx-bundle-identifier={APP_NAME.lower().replace(" ", ".")}.app')
+        
+        # Add the main script
+        cmd_parts.append('main.py')
+        
+        cmd = ' '.join(cmd_parts)
+        run_command(cmd)
     
     app_name = f"{APP_NAME}{CURRENT_PLATFORM['file_extension']}"
     print(f"[SUCCESS] App bundle created: dist/{app_name}")

@@ -24,7 +24,7 @@ def connect():
             main_window_instance.add_log_message("[Flask] /connect API called from browser!")
         except Exception as e:
             print(f"[Flask] Could not log to UI: {e}")
-    return 'Connected to Image Folder Analyzer Flask server!'
+    return 'Connected to Bignan Mancha OMR Reader Flask server!'
 
 def run_flask():
     flask_app.run(host='0.0.0.0', port=5023, debug=False, use_reloader=False)
@@ -42,8 +42,8 @@ signal_processor = CrossThreadSignalProcessor()
 def main():
     global main_window_instance
     app = QApplication(sys.argv)
-    app.setApplicationName("Image Folder Analyzer")
-    app.setApplicationVersion("1.0")
+    app.setApplicationName("Bignan Mancha OMR Reader")
+    app.setApplicationVersion("2.0")
 
     # Apply global style
     app.setStyleSheet("""

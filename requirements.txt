@@ -26,3 +26,9 @@ dmgbuild>=1.6.0; sys_platform == "darwin"
 # Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
 # macOS: brew install tesseract
 # Linux: sudo apt-get install tesseract-ocr
+
+# Note: For pdf2image to work, you need to install Poppler:
+# Windows: Download from https://github.com/oschwartz10612/poppler-windows/releases/
+#          Extract to C:\Program Files\poppler or C:\poppler and add bin folder to PATH
+# macOS: brew install poppler
+# Linux: sudo apt-get install poppler-utils

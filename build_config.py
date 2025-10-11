@@ -4,11 +4,11 @@ Build configuration for Image Folder Analyzer
 """
 import platform
 
-APP_NAME = "Image Folder Analyzer"
-APP_VERSION = "1.0.0"
-APP_BUNDLE_ID = "com.imageanalyzer.app"
-APP_AUTHOR = "Your Name"
-APP_DESCRIPTION = "A tool for analyzing and viewing images in folders"
+APP_NAME = "Bignan Mancha OMR Reader"
+APP_VERSION = "2.0.0"
+APP_BUNDLE_ID = "com.bignanmancha.omr.reader"
+APP_AUTHOR = "Bignan Mancha"
+APP_DESCRIPTION = "OMR (Optical Mark Recognition) sheet processing and analysis tool"
 
 # Platform detection
 CURRENT_OS = platform.system().lower()
