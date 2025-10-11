@@ -108,9 +108,9 @@ jobs:
       with:
         name: ${{ matrix.platform }}-build
         path: |
-          *_Setup.exe
-          *.dmg
-          *_v*.zip
+          Bignan_Mancha_OMR_Reader_*_Setup.exe
+          Bignan_Mancha_OMR_Reader_*.dmg
+          Bignan_Mancha_OMR_Reader_*.zip
         retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
   # Create release after all builds complete
@@ -133,40 +133,45 @@ jobs:
       run: |
         echo "Files in current directory:"
         ls -la
-        echo "Looking for installer files:"
-        find . -name "*_Setup.exe" -o -name "*.dmg" -o -name "*_*.zip" | head -10
-        echo "All .exe files:"
-        find . -name "*.exe" | head -10
+        echo "Looking for Bignan Mancha OMR Reader installers:"
+        find . -name "Bignan_Mancha_OMR_Reader_*" | head -10
         
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        name: Image Folder Analyzer ${{ github.ref_name }}
+        name: Bignan Mancha OMR Reader ${{ github.ref_name }}
         body: |
-          ## 🚀 Image Folder Analyzer ${{ github.ref_name }}
+          ## 🚀 Bignan Mancha OMR Reader ${{ github.ref_name }}
           
           ### 📥 Downloads:
-          - **Windows**: `*_Setup.exe` - Full installer with shortcuts
-          - **macOS**: `*.dmg` - Drag to Applications folder  
+          - **Windows**: `Bignan_Mancha_OMR_Reader_*_Setup.exe` - Full installer with shortcuts (includes Poppler)
+          - **macOS**: `Bignan_Mancha_OMR_Reader_*.dmg` - Drag to Applications folder
           
           ### ✨ Features:
-          - Analyze image folders with detailed statistics
-          - Preview images with EXIF data
-          - Automatic slideshow scanning
-          - Export analysis results
+          - **OMR Sheet Processing** - Process and analyze OMR (Optical Mark Recognition) sheets
+          - **PDF Extraction** - Extract pages from PDF files (built-in Poppler support on Windows)
+          - **Image Analysis** - Detailed statistics and metadata viewing
+          - **Batch Processing** - Process multiple sheets efficiently
+          - **Export Results** - Export analysis results in various formats
           
           ### 🛠️ System Requirements:
-          - **Windows**: Windows 10 or later
-          - **macOS**: macOS 10.14 or later  
+          - **Windows**: Windows 10 or later (Poppler bundled - no additional installation needed)
+          - **macOS**: macOS 10.14 or later (requires `brew install poppler`)
+          
+          ### 📝 What's New in v2.0:
+          - Application rebranded to "Bignan Mancha OMR Reader"
+          - **Automatic Poppler bundling for Windows** - PDF extraction works out-of-the-box
+          - Enhanced error handling and user messages
+          - Improved cross-platform compatibility
           
           ---
           
           **Note**: Only the latest ${{ env.MAX_RELEASES_TO_KEEP }} releases are kept to manage storage.
           
         files: |
-          **/*_Setup.exe
-          **/*.dmg
-          **/*_v*.zip
+          **/Bignan_Mancha_OMR_Reader_*_Setup.exe
+          **/Bignan_Mancha_OMR_Reader_*.dmg
+          **/Bignan_Mancha_OMR_Reader_*.zip
         draft: false
         prerelease: false
       env:
