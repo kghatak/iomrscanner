@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Script to download Poppler binaries for Windows bundling.
 This script downloads and extracts Poppler so it can be bundled with the application.
@@ -10,6 +11,15 @@ import urllib.request
 import zipfile
 import shutil
 from pathlib import Path
+
+# Fix Windows encoding issues
+if sys.platform == 'win32':
+    # Set UTF-8 encoding for stdout/stderr
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    # Set console to UTF-8
+    os.system('chcp 65001 >nul 2>&1')
 
 # Poppler version and download URL
 POPPLER_VERSION = "24.08.0-0"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Cross-platform build script for Image Folder Analyzer
+Cross-platform build script for Bignan Mancha OMR Reader
 Supports Windows EXE, macOS DMG, and Linux AppImage builds
 """
 
@@ -10,6 +11,16 @@ import subprocess
 import shutil
 import platform
 from pathlib import Path
+
+# Fix Windows encoding issues
+if sys.platform == 'win32':
+    # Set UTF-8 encoding for stdout/stderr
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    # Set console to UTF-8
+    os.system('chcp 65001 >nul 2>&1')
+
 from build_config import (
     APP_NAME, APP_VERSION, CURRENT_OS, CURRENT_PLATFORM, 
     NSIS_CONFIG, DMG_CONFIG
