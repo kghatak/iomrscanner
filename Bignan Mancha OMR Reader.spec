@@ -1,19 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 import os
 import sys
+
+# Fix Windows encoding for print statements
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Check if poppler_bundle exists (for Windows bundling)
 poppler_bundle_path = 'poppler_bundle'
 datas_list = [('ui', 'ui')]
 
 if os.path.exists(poppler_bundle_path) and sys.platform == 'win32':
-    print(f"✅ Including Poppler bundle from: {poppler_bundle_path}")
+    print(f"[OK] Including Poppler bundle from: {poppler_bundle_path}")
     datas_list.append((poppler_bundle_path, 'poppler_bundle'))
 else:
     if sys.platform == 'win32':
-        print("⚠️  Warning: poppler_bundle not found. Run download_poppler_windows.py first for bundled Poppler.")
+        print("[WARNING] poppler_bundle not found. Run download_poppler_windows.py first for bundled Poppler.")
 
 a = Analysis(
     ['main.py'],
