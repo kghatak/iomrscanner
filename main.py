@@ -43,7 +43,7 @@ def main():
     global main_window_instance
     app = QApplication(sys.argv)
     app.setApplicationName("Bignan Mancha OMR Reader")
-    app.setApplicationVersion("2.0.6")
+    app.setApplicationVersion("2.0.8")
 
     # Apply global style
     app.setStyleSheet("""
