@@ -245,6 +245,11 @@ class MainWindow(QMainWindow):
             self.results_panel.analyze_folder(output_folder)
             if hasattr(self, 'image_panel'):
                 self.image_panel.load_folder(output_folder)
+            
+            # Immediately start serial pipeline processing on the extracted images
+            # This processes one file end-to-end before moving to the next
+            if hasattr(self, 'results_panel'):
+                self.results_panel.start_pipeline_processing()
                 
         except ImportError as e:
             QMessageBox.critical(

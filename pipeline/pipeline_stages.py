@@ -21,6 +21,7 @@ from .base_stage import PipelineStage
 from .aruco_check_stage import ArUcoCheckStage
 from .orientation_check_stage import OrientationCheckStage
 from .roll_number_extraction_stage import RollNumberExtractionStage
+from .fetch_student_stage import FetchStudentStage
 from .omr_processing_stage import OMRProcessingStage
 from .omr_answer_extraction_stage import OMRAnswerExtractionStage
 from .answer_validation_stage import AnswerValidationStage
@@ -59,6 +60,7 @@ class PipelineManager:
             ArUcoCheckStage(self.processor),
             OrientationCheckStage(self.processor),
             RollNumberExtractionStage(self.processor),
+            FetchStudentStage(self.processor),  # Fetch student data after roll number extraction
             OMRProcessingStage(self.processor),
             OMRAnswerExtractionStage(self.processor),
             AnswerValidationStage(self.processor),  # Validate and detect answers
@@ -298,6 +300,9 @@ class PipelineManager:
                 
                 # Get data for display
                 marked_count = context.get('marked_count', 0)
+                student_class = context.get('student_class')
+                exam_code = context.get('exam_code')
+                student_code = context.get('student_code')
                 
                 # Main SUCCESS text
                 text = "SUCCESS"
@@ -329,15 +334,42 @@ class PipelineManager:
                 cv2.putText(success_image, detail_line, (details_x, details_y), 
                            font_small, font_scale_small, (0, 255, 0), thickness_small)
                 
-                # 2. Number of answers Marked
+                # 2. Class (if available)
                 details_y += line_height
+                if student_class is not None:
+                    detail_line = f"Class: {student_class}"
+                    cv2.putText(success_image, detail_line, (details_x+2, details_y+2), 
+                               font_small, font_scale_small, (0, 0, 0), thickness_small)
+                    cv2.putText(success_image, detail_line, (details_x, details_y), 
+                               font_small, font_scale_small, (0, 255, 0), thickness_small)
+                    details_y += line_height
+                
+                # 3. ExamCode (if available)
+                if exam_code is not None:
+                    detail_line = f"ExamCode: {exam_code}"
+                    cv2.putText(success_image, detail_line, (details_x+2, details_y+2), 
+                               font_small, font_scale_small, (0, 0, 0), thickness_small)
+                    cv2.putText(success_image, detail_line, (details_x, details_y), 
+                               font_small, font_scale_small, (0, 255, 0), thickness_small)
+                    details_y += line_height
+                
+                # 4. StudentCode (if available)
+                if student_code is not None:
+                    detail_line = f"StudentCode: {student_code}"
+                    cv2.putText(success_image, detail_line, (details_x+2, details_y+2), 
+                               font_small, font_scale_small, (0, 0, 0), thickness_small)
+                    cv2.putText(success_image, detail_line, (details_x, details_y), 
+                               font_small, font_scale_small, (0, 255, 0), thickness_small)
+                    details_y += line_height
+                
+                # 5. Number of answers Marked
                 detail_line = f"Number of answers Marked: {marked_count}"
                 cv2.putText(success_image, detail_line, (details_x+2, details_y+2), 
                            font_small, font_scale_small, (0, 0, 0), thickness_small)
                 cv2.putText(success_image, detail_line, (details_x, details_y), 
                            font_small, font_scale_small, (0, 255, 0), thickness_small)
                 
-                # 3. Number of Answers correct (blank for now)
+                # 6. Number of Answers correct (blank for now)
                 details_y += line_height
                 detail_line = "Number of Answers correct: _____"
                 cv2.putText(success_image, detail_line, (details_x+2, details_y+2), 
@@ -345,7 +377,7 @@ class PipelineManager:
                 cv2.putText(success_image, detail_line, (details_x, details_y), 
                            font_small, font_scale_small, (255, 255, 255), thickness_small)  # White for blank
                 
-                # 4. Marks obtained (blank for now)
+                # 7. Marks obtained (blank for now)
                 details_y += line_height
                 detail_line = "Marks obtained: _____"
                 cv2.putText(success_image, detail_line, (details_x+2, details_y+2), 

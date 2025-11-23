@@ -310,6 +310,12 @@ class RollNumberExtractionStage(PipelineStage):
         print(f"[{class_name}] Cleaning text...")
         cleaned_text = text.strip()
         
+        # Step 1: Normalize hyphens by removing spaces before and after them
+        # This handles cases like "NAYA2508 - 0075" -> "NAYA2508-0075"
+        print(f"[{class_name}] Normalizing hyphens (removing spaces around '-')...")
+        cleaned_text = re.sub(r'\s*-\s*', '-', cleaned_text)  # " - " or " -" or "- " -> "-"
+        print(f"[{class_name}] After hyphen normalization: '{cleaned_text}'")
+        
         # Remove leading/trailing special characters but keep alphanumeric
         cleaned_text = re.sub(r'^[^A-Za-z0-9]+', '', cleaned_text)  # Remove leading non-alphanumeric
         cleaned_text = re.sub(r'[^A-Za-z0-9]+$', '', cleaned_text)  # Remove trailing non-alphanumeric
@@ -319,6 +325,12 @@ class RollNumberExtractionStage(PipelineStage):
         # Patterns for roll numbers (ordered by specificity)
         # Note: Patterns allow dashes, underscores, and slashes within roll numbers
         patterns = [
+            # Priority pattern: Letters + digits + dash + exactly 4 digits (e.g., NAYA2508-0075)
+            r'\b([A-Z]{2,6}[A-Z0-9]*-\d{4})\b',  # Letters + optional alphanumeric + dash + exactly 4 digits
+            
+            # Pattern: Letters + dash + exactly 4 digits (e.g., NAYA-0075)
+            r'\b([A-Z]{2,6}-\d{4})\b',  # Letters + dash + exactly 4 digits
+            
             # Alphanumeric patterns with separators (e.g., SURI-123123123, JAMB24090019)
             r'\b([A-Z]{2,6}[-_/]?\d{6,12})\b',  # Letters + optional separator + numbers
             r'\b([A-Z]{2,6}[-_/]?[A-Z0-9]{6,12})\b',  # Letters + optional separator + mixed
@@ -341,32 +353,132 @@ class RollNumberExtractionStage(PipelineStage):
         ]
         
         print(f"[{class_name}] Trying {len(patterns)} regex patterns")
+        print(f"[{class_name}] Text to search: '{cleaned_text}'")
+        
+        # Check if text contains a dash - if so, we should prioritize dash patterns
+        has_dash_in_text = '-' in cleaned_text
+        print(f"[{class_name}] Text contains dash: {has_dash_in_text}")
+        if has_dash_in_text:
+            print(f"[{class_name}] → Will require dash + exactly 4 digits format")
         
         # Try patterns on cleaned text first
         for i, pattern in enumerate(patterns, 1):
+            print(f"[{class_name}] ========================================")
             print(f"[{class_name}] Pattern {i}/{len(patterns)}: {pattern}")
             match = re.search(pattern, cleaned_text, re.IGNORECASE)
             if match:
                 roll_number = match.group(1).upper()  # Convert to uppercase for consistency
+                print(f"[{class_name}]   → Match found: '{match.group(1)}'")
+                print(f"[{class_name}]   → After upper(): '{roll_number}'")
+                print(f"[{class_name}]   → Length: {len(roll_number)} characters")
                 
                 # Additional validation - ensure it's not too short
                 if len(roll_number) >= 6:
-                    print(f"[{class_name}] ✅ Match found! Roll number: {roll_number}")
+                    # If text contains a dash, roll number MUST have dash + exactly 4 digits
+                    if has_dash_in_text:
+                        if '-' not in roll_number:
+                            print(f"[{class_name}]   ⚠️ REJECTED: Text contains dash, but roll number doesn't")
+                            print(f"[{class_name}]   → Trying next pattern...")
+                            continue
+                    
+                    # If roll number contains a dash, validate that exactly 4 digits follow it
+                    if '-' in roll_number:
+                        parts = roll_number.split('-', 1)  # Split only on first dash
+                        if len(parts) == 2:
+                            before_dash = parts[0]
+                            after_dash = parts[1]
+                            print(f"[{class_name}]   → Contains dash: '{before_dash}' - '{after_dash}'")
+                            if not (after_dash.isdigit() and len(after_dash) == 4):
+                                print(f"[{class_name}]   ⚠️ REJECTED: Dash must be followed by exactly 4 digits")
+                                print(f"[{class_name}]   → Found: '{after_dash}' (length: {len(after_dash)}, isdigit: {after_dash.isdigit()})")
+                                print(f"[{class_name}]   → Trying next pattern...")
+                                continue  # Skip this match, try next pattern
+                            else:
+                                print(f"[{class_name}]   ✅ VALID: Dash followed by exactly 4 digits")
+                    else:
+                        if has_dash_in_text:
+                            print(f"[{class_name}]   ⚠️ REJECTED: Text has dash but roll number doesn't")
+                            print(f"[{class_name}]   → Trying next pattern...")
+                            continue
+                        else:
+                            print(f"[{class_name}]   → No dash in roll number (acceptable for non-dash patterns)")
+                    
+                    print(f"[{class_name}] ========================================")
+                    print(f"[{class_name}] ✅ SUCCESS! Final roll number: {roll_number}")
                     print(f"[{class_name}] Matched pattern: {pattern}")
-                    print(f"[{class_name}] Roll number length: {len(roll_number)} characters")
                     return roll_number
                 else:
-                    print(f"[{class_name}] ⚠️ Match too short ({len(roll_number)} chars), skipping")
+                    print(f"[{class_name}]   ⚠️ REJECTED: Match too short ({len(roll_number)} chars, minimum 6)")
+                    print(f"[{class_name}]   → Trying next pattern...")
+            else:
+                print(f"[{class_name}]   → No match")
         
-        # If no match on cleaned text, try on original text as fallback
-        print(f"[{class_name}] No match on cleaned text, trying original text...")
+        print(f"[{class_name}] ========================================")
+        
+        # If no match on cleaned text, try on original text as fallback (with hyphen normalization)
+        print(f"[{class_name}] ========================================")
+        print(f"[{class_name}] No match on cleaned text, trying original text as fallback...")
+        # Normalize hyphens in original text too
+        normalized_original = re.sub(r'\s*-\s*', '-', text.strip())
+        print(f"[{class_name}] Normalized original text: '{normalized_original}'")
+        
+        # Check if normalized original text contains a dash
+        has_dash_in_original = '-' in normalized_original
+        print(f"[{class_name}] Normalized text contains dash: {has_dash_in_original}")
+        if has_dash_in_original:
+            print(f"[{class_name}] → Will require dash + exactly 4 digits format")
+        
         for i, pattern in enumerate(patterns, 1):
-            match = re.search(pattern, text, re.IGNORECASE)
+            print(f"[{class_name}] ========================================")
+            print(f"[{class_name}] Pattern {i}/{len(patterns)}: {pattern}")
+            match = re.search(pattern, normalized_original, re.IGNORECASE)
             if match:
                 roll_number = match.group(1).upper()
+                print(f"[{class_name}]   → Match found: '{match.group(1)}'")
+                print(f"[{class_name}]   → After upper(): '{roll_number}'")
+                print(f"[{class_name}]   → Length: {len(roll_number)} characters")
+                
                 if len(roll_number) >= 6:
-                    print(f"[{class_name}] ✅ Match found in original text! Roll number: {roll_number}")
+                    # If text contains a dash, roll number MUST have dash + exactly 4 digits
+                    if has_dash_in_original:
+                        if '-' not in roll_number:
+                            print(f"[{class_name}]   ⚠️ REJECTED: Text contains dash, but roll number doesn't")
+                            print(f"[{class_name}]   → Trying next pattern...")
+                            continue
+                    
+                    # If roll number contains a dash, validate that exactly 4 digits follow it
+                    if '-' in roll_number:
+                        parts = roll_number.split('-', 1)  # Split only on first dash
+                        if len(parts) == 2:
+                            before_dash = parts[0]
+                            after_dash = parts[1]
+                            print(f"[{class_name}]   → Contains dash: '{before_dash}' - '{after_dash}'")
+                            if not (after_dash.isdigit() and len(after_dash) == 4):
+                                print(f"[{class_name}]   ⚠️ REJECTED: Dash must be followed by exactly 4 digits")
+                                print(f"[{class_name}]   → Found: '{after_dash}' (length: {len(after_dash)}, isdigit: {after_dash.isdigit()})")
+                                print(f"[{class_name}]   → Trying next pattern...")
+                                continue  # Skip this match, try next pattern
+                            else:
+                                print(f"[{class_name}]   ✅ VALID: Dash followed by exactly 4 digits")
+                    else:
+                        if has_dash_in_original:
+                            print(f"[{class_name}]   ⚠️ REJECTED: Text has dash but roll number doesn't")
+                            print(f"[{class_name}]   → Trying next pattern...")
+                            continue
+                        else:
+                            print(f"[{class_name}]   → No dash in roll number (acceptable for non-dash patterns)")
+                    
+                    print(f"[{class_name}] ========================================")
+                    print(f"[{class_name}] ✅ SUCCESS! Final roll number: {roll_number}")
+                    print(f"[{class_name}] Matched pattern: {pattern}")
                     return roll_number
+                else:
+                    print(f"[{class_name}]   ⚠️ REJECTED: Match too short ({len(roll_number)} chars, minimum 6)")
+                    print(f"[{class_name}]   → Trying next pattern...")
+            else:
+                print(f"[{class_name}]   → No match")
+        
+        print(f"[{class_name}] ========================================")
         
         print(f"[{class_name}] ❌ No roll number found with any pattern")
         return None
