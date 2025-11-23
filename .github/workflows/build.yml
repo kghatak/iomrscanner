@@ -7,13 +7,49 @@ on:
   workflow_dispatch:
 
 env:
-  # Configure retention settings
-  ARTIFACT_RETENTION_DAYS: 30
-  MAX_RELEASES_TO_KEEP: 5
+  # Configure retention settings - reduced to save storage
+  ARTIFACT_RETENTION_DAYS: 7  # Keep artifacts for only 7 days (they're attached to releases anyway)
+  MAX_RELEASES_TO_KEEP: 3  # Keep only last 3 releases
 
 jobs:
-  # Clean up old releases first
+  # Clean up old artifacts first
+  cleanup-artifacts:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+    - name: Delete old artifacts
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            per_page: 100
+          });
+          
+          const now = Date.now();
+          const retentionDays = 7; // Match ARTIFACT_RETENTION_DAYS
+          const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+          
+          for (const artifact of artifacts.artifacts) {
+            const createdAt = new Date(artifact.created_at).getTime();
+            const age = now - createdAt;
+            
+            if (age > retentionMs) {
+              console.log(`Deleting old artifact: ${artifact.name} (${Math.round(age / (24 * 60 * 60 * 1000))} days old)`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }
+          }
+  
+  # Clean up old releases
   cleanup:
+    needs: [cleanup-artifacts]
+    runs-on: ubuntu-latest
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -60,7 +96,7 @@ jobs:
           }
 
   build:
-    needs: [cleanup]
+    needs: [cleanup-artifacts, cleanup]
     if: always() && (needs.cleanup.result == 'success' || needs.cleanup.result == 'skipped')
     permissions:
       contents: write
@@ -104,6 +140,7 @@ jobs:
         python build_cross_platform.py
     
     - name: Upload artifacts
+      if: startsWith(github.ref, 'refs/tags/')  # Only upload artifacts on tag pushes
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}-build
@@ -112,6 +149,7 @@ jobs:
           Bignan_Mancha_OMR_Reader_*.dmg
           Bignan_Mancha_OMR_Reader_*.zip
         retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+        compression-level: 9  # Maximum compression to reduce size
 
   # Create release after all builds complete
   release:
