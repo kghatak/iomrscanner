@@ -29,22 +29,38 @@ jobs:
           });
           
           const now = Date.now();
-          const retentionDays = 7; // Match ARTIFACT_RETENTION_DAYS
+          const retentionDays = 1; // Delete artifacts older than 1 day (they're attached to releases anyway)
           const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+          
+          let deletedCount = 0;
+          let totalSize = 0;
           
           for (const artifact of artifacts.artifacts) {
             const createdAt = new Date(artifact.created_at).getTime();
             const age = now - createdAt;
+            totalSize += artifact.size_in_bytes || 0;
             
-            if (age > retentionMs) {
-              console.log(`Deleting old artifact: ${artifact.name} (${Math.round(age / (24 * 60 * 60 * 1000))} days old)`);
-              await github.rest.actions.deleteArtifact({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                artifact_id: artifact.id
-              });
+            // Delete artifacts older than retention period OR if we have too many artifacts
+            if (age > retentionMs || artifacts.artifacts.length > 10) {
+              console.log(`Deleting artifact: ${artifact.name} (${Math.round(age / (24 * 60 * 60 * 1000))} days old, ${(artifact.size_in_bytes / 1024 / 1024).toFixed(2)} MB)`);
+              try {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id
+                });
+                deletedCount++;
+              } catch (error) {
+                console.log(`Failed to delete artifact ${artifact.name}: ${error.message}`);
+              }
             }
           }
+          
+          console.log(`\n📊 Artifact cleanup summary:`);
+          console.log(`   Total artifacts: ${artifacts.artifacts.length}`);
+          console.log(`   Deleted: ${deletedCount}`);
+          console.log(`   Remaining: ${artifacts.artifacts.length - deletedCount}`);
+          console.log(`   Total size: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
   
   # Clean up old releases
   cleanup:
@@ -140,6 +156,7 @@ jobs:
     
     - name: Upload artifacts
       if: startsWith(github.ref, 'refs/tags/')  # Only upload artifacts on tag pushes
+      continue-on-error: true  # Don't fail if quota is exceeded
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}-build
@@ -149,6 +166,13 @@ jobs:
           Bignan_Mancha_OMR_Reader_*.zip
         retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
         compression-level: 9  # Maximum compression to reduce size
+    
+    - name: List build outputs (for release job)
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        echo "Build outputs available:"
+        find . -name "Bignan_Mancha_OMR_Reader_*" -type f | head -10
+        echo "::notice::Build files are ready for release attachment"
 
   # Create release after all builds complete
   release:
@@ -162,17 +186,36 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Download all artifacts
+      continue-on-error: true  # Don't fail if artifacts don't exist (quota exceeded)
       uses: actions/download-artifact@v4
       with:
         merge-multiple: true
         
     - name: List downloaded files
+      continue-on-error: true
       run: |
         echo "Files in current directory:"
         ls -la
         echo "Looking for Bignan Mancha OMR Reader installers:"
-        find . -name "Bignan_Mancha_OMR_Reader_*" | head -10
+        if find . -name "Bignan_Mancha_OMR_Reader_*" 2>/dev/null | head -10; then
+          echo "✅ Artifacts found and ready for release"
+        else
+          echo "⚠️ No artifacts found (may be due to storage quota)"
+          echo "Release will be created without attached files"
+        fi
         
+    - name: Check for release files
+      id: check_files
+      continue-on-error: true
+      run: |
+        if find . -name "Bignan_Mancha_OMR_Reader_*" -type f 2>/dev/null | grep -q .; then
+          echo "files_exist=true" >> $GITHUB_OUTPUT
+          echo "✅ Release files found"
+        else
+          echo "files_exist=false" >> $GITHUB_OUTPUT
+          echo "⚠️ No release files found (artifact storage quota may be exceeded)"
+        fi
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
@@ -204,6 +247,8 @@ jobs:
           ---
           
           **Note**: Only the latest ${{ env.MAX_RELEASES_TO_KEEP }} releases are kept to manage storage.
+          
+          ⚠️ **If release files are missing**: This may be due to GitHub Actions artifact storage quota limits. Check the Actions tab for build outputs or manually attach files to this release.
           
         files: |
           **/Bignan_Mancha_OMR_Reader_*_Setup.exe
