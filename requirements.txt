@@ -10,6 +10,7 @@ numpy>=1.21.0,<2.0.0
 pdf2image>=1.16.0
 fpdf>=1.7.2
 qrcode>=8.0
+requests>=2.25.0
 
 # ML Pipeline dependencies
 pandas>=1.3.0,<2.0.0
