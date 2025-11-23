@@ -5,7 +5,7 @@ Build configuration for Image Folder Analyzer
 import platform
 
 APP_NAME = "Bignan Mancha OMR Reader"
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.0.9"
 APP_BUNDLE_ID = "com.bignanmancha.omr.reader"
 APP_AUTHOR = "Bignan Mancha"
 APP_DESCRIPTION = "OMR (Optical Mark Recognition) sheet processing and analysis tool"
