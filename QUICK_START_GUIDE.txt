@@ -1,0 +1,86 @@
+================================================================================
+  BIGNAN MANCHA OMR READER - QUICK START GUIDE FOR WINDOWS USERS
+================================================================================
+
+EASIEST WAY TO RUN THE APPLICATION:
+====================================
+
+1. Extract the ZIP file to any folder (e.g., C:\Bignan_Mancha_OMR_Reader)
+
+2. Double-click "run_app.bat"
+   - The script will automatically set up everything
+   - First time may take 5-10 minutes (installing dependencies)
+   - After that, it will start quickly
+
+3. That's it! The application window will open.
+
+================================================================================
+WHAT IF PYTHON IS NOT INSTALLED?
+================================================================================
+
+If you see "Python is not installed", follow these steps:
+
+1. Go to: https://www.python.org/downloads/
+2. Download Python 3.9 or later (click the big yellow button)
+3. Run the installer
+4. IMPORTANT: Check the box "Add Python to PATH" at the bottom
+5. Click "Install Now"
+6. Wait for installation to complete
+7. Restart your computer
+8. Try running run_app.bat again
+
+================================================================================
+WHAT IF SOMETHING GOES WRONG?
+================================================================================
+
+Problem: "Failed to install dependencies"
+Solution: 
+  - Make sure you have internet connection
+  - Try running as Administrator (right-click run_app.bat > Run as administrator)
+  - Check if antivirus is blocking the installation
+
+Problem: "Application window doesn't open"
+Solution:
+  - Check the black console window for error messages
+  - Make sure all dependencies installed successfully
+  - Try closing and reopening run_app.bat
+
+Problem: "PDF extraction doesn't work"
+Solution:
+  - Install Poppler (optional but recommended):
+    1. Download from: https://github.com/oschwartz10612/poppler-windows/releases/
+    2. Extract to C:\poppler
+    3. Add C:\poppler\Library\bin to your system PATH
+
+================================================================================
+MANUAL SETUP (FOR ADVANCED USERS)
+================================================================================
+
+If you prefer to set up manually:
+
+1. Open Command Prompt (cmd) in this folder
+2. Type: python -m venv venv
+3. Type: venv\Scripts\activate
+4. Type: pip install -r requirements.txt
+5. Type: python main.py
+
+================================================================================
+FEATURES
+================================================================================
+
+✓ Process OMR sheets from PDF files
+✓ Extract images from PDF automatically
+✓ Extract roll numbers with validation
+✓ Fetch student data from API
+✓ Process one file at a time (serial processing)
+✓ Upload results and validate answers
+✓ View success/error results with thumbnails
+
+================================================================================
+SUPPORT
+================================================================================
+
+For more help, check README.md or README_PORTABLE.txt
+
+================================================================================
+

@@ -1,0 +1,29 @@
+================================================================================
+                    START HERE - READ THIS FIRST!
+================================================================================
+
+TO RUN THIS APPLICATION:
+
+1. Double-click "run_app.bat"
+   
+   That's it! The script will automatically:
+   - Check if Python is installed
+   - Set up everything needed
+   - Install dependencies (first time only, takes 5-10 minutes)
+   - Launch the application
+
+2. If you see "Python is not installed":
+   - Go to: https://www.python.org/downloads/
+   - Download and install Python 3.9 or later
+   - IMPORTANT: Check "Add Python to PATH" during installation
+   - Restart your computer
+   - Run run_app.bat again
+
+================================================================================
+
+For more detailed instructions, see:
+- QUICK_START_GUIDE.txt (detailed guide)
+- README_PORTABLE.txt (full documentation)
+
+================================================================================
+
