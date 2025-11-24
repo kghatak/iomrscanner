@@ -13,7 +13,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Bignan Mancha OMR Reader v2.0.9")
+        self.setWindowTitle("Bignan Mancha OMR Reader v2.1.0")
         self.setGeometry(100, 100, 1200, 800)
         self.setStyleSheet("""
             QMainWindow {
@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "About Bignan Mancha OMR Reader",
-            "Bignan Mancha OMR Reader v2.0.9\n\n"
+            "Bignan Mancha OMR Reader v2.1.0\n\n"
             "OMR (Optical Mark Recognition) sheet processing and analysis tool.\n"
             "Built with PyQt5.\n\n"
             "What's New in v2.0:\n"
