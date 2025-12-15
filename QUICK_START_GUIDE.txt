@@ -18,8 +18,18 @@ EASIEST WAY TO RUN THE APPLICATION:
 WHAT IF PYTHON IS NOT INSTALLED?
 ================================================================================
 
-If you see "Python is not installed", follow these steps:
+AUTOMATIC SETUP (RECOMMENDED):
+-------------------------------
+The script will automatically offer to download Python for you!
 
+1. When you see "Download Python automatically (Y/N)?"
+2. Type Y and press Enter
+3. Python will be downloaded and set up automatically
+4. No installation needed - it's portable Python!
+5. The script will continue automatically
+
+MANUAL SETUP (If automatic download fails):
+--------------------------------------------
 1. Go to: https://www.python.org/downloads/
 2. Download Python 3.9 or later (click the big yellow button)
 3. Run the installer
@@ -51,6 +61,30 @@ Solution:
     1. Download from: https://github.com/oschwartz10612/poppler-windows/releases/
     2. Extract to C:\poppler
     3. Add C:\poppler\Library\bin to your system PATH
+
+================================================================================
+HOW TO UNINSTALL
+================================================================================
+
+To remove the application and all its components:
+
+1. Double-click "uninstall.bat"
+   - This will remove:
+     * Virtual environment (venv folder)
+     * Bundled Python (python folder - if auto-downloaded)
+     * Temporary files and caches
+     * Build artifacts (optional)
+
+2. After uninstall.bat completes:
+   - Delete the entire application folder to completely remove
+
+3. Alternative method:
+   - Run: run_app.bat --uninstall
+
+NOTE: This will NOT remove:
+   - System Python (if you installed it separately)
+   - Your processed files in success/error folders
+   - Application source files (delete folder manually)
 
 ================================================================================
 MANUAL SETUP (FOR ADVANCED USERS)

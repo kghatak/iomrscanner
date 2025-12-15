@@ -5,7 +5,9 @@ Build configuration for Image Folder Analyzer
 import platform
 
 APP_NAME = "Bignan Mancha OMR Reader"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
+# Windows-facing product name (what the user sees in Programs & Features / shortcuts)
+WINDOWS_PRODUCT_NAME = f"OMR Exam Reader {APP_VERSION}"
 APP_BUNDLE_ID = "com.bignanmancha.omr.reader"
 APP_AUTHOR = "Bignan Mancha"
 APP_DESCRIPTION = "OMR (Optical Mark Recognition) sheet processing and analysis tool"
@@ -65,14 +67,19 @@ DMG_CONFIG = {
 
 # NSIS configuration (Windows only)
 NSIS_CONFIG = {
-    'name': APP_NAME,
+    # Visible product name in installer UI and Add/Remove Programs
+    'product_name': WINDOWS_PRODUCT_NAME,
+    'app_name': APP_NAME,
     'version': APP_VERSION,
     'publisher': APP_AUTHOR,
     'description': APP_DESCRIPTION,
     'license': 'LICENSE.txt',  # Optional: license file
     'icon': CURRENT_PLATFORM['icon'],
+    # Install folder still uses the technical app name to keep path stable
     'install_dir': f'$PROGRAMFILES\\{APP_NAME}',
     'start_menu': True,
     'desktop_shortcut': True,
     'uninstaller': True,
+    # Registry key used to detect existing installs (no version so upgrades overwrite)
+    'registry_key': 'OMR Exam Reader',
 }

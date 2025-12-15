@@ -129,16 +129,18 @@ def create_readme_for_package(version="2.0.9"):
 
 2. **Double-click `run_app.bat`** to launch the application
    - The script will automatically:
-     - Check if Python is installed
+     - Check if Python is installed (or download it automatically!)
      - Set up a virtual environment
      - Install all required dependencies
      - Launch the application
 
-3. **First-time setup** (if Python is not installed):
-   - Download Python 3.9 or later from: https://www.python.org/downloads/
-   - During installation, make sure to check **"Add Python to PATH"**
-   - Restart your computer after installation
-   - Run `run_app.bat` again
+3. **To uninstall**: Double-click `uninstall.bat` to remove all components
+
+4. **First-time setup** (if Python is not installed):
+   - The script will automatically offer to download Python for you!
+   - When prompted "Download Python automatically (Y/N)?", type **Y** and press Enter
+   - Python will be downloaded and set up automatically (no installation needed!)
+   - If automatic download doesn't work, manually install from: https://www.python.org/downloads/
 
 ### System Requirements:
 
@@ -172,6 +174,16 @@ For full functionality, you may need:
 
 **Problem**: PDF extraction doesn't work
 - **Solution**: Install Poppler (see Optional Dependencies above)
+
+### Uninstalling:
+
+To remove the application:
+
+1. **Double-click `uninstall.bat`**
+   - This removes virtual environment, bundled Python, and temporary files
+   - Follow the prompts to choose what to remove
+
+2. **Delete the folder** to completely remove the application
 
 ### Manual Installation (Advanced):
 
@@ -266,8 +278,8 @@ def create_portable_package(output_name=None):
     
     print(f"   ✓ Copied {files_copied} files")
     
-    # Copy instruction files
-    instruction_files = ["START_HERE.txt", "QUICK_START_GUIDE.txt"]
+    # Copy instruction files and scripts
+    instruction_files = ["START_HERE.txt", "QUICK_START_GUIDE.txt", "uninstall.bat"]
     for inst_file in instruction_files:
         if (project_root / inst_file).exists():
             shutil.copy2(project_root / inst_file, temp_dir / inst_file)

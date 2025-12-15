@@ -8,16 +8,37 @@ TO RUN THIS APPLICATION:
    
    That's it! The script will automatically:
    - Check if Python is installed
+   - If not, offer to download Python automatically (NO INSTALLATION NEEDED!)
    - Set up everything needed
    - Install dependencies (first time only, takes 5-10 minutes)
    - Launch the application
 
-2. If you see "Python is not installed":
+2. If Python is not installed:
+   - The script will ask: "Download Python automatically (Y/N)?"
+   - Type Y and press Enter
+   - Python will be downloaded and set up automatically
+   - No manual installation needed!
+
+3. If automatic download doesn't work:
    - Go to: https://www.python.org/downloads/
    - Download and install Python 3.9 or later
    - IMPORTANT: Check "Add Python to PATH" during installation
    - Restart your computer
    - Run run_app.bat again
+
+================================================================================
+
+TO UNINSTALL:
+
+- Double-click "uninstall.bat"
+- Or run: run_app.bat --uninstall
+
+This will remove:
+- Virtual environment
+- Bundled Python (if auto-downloaded)
+- Temporary files
+
+To completely remove, delete the entire folder after running uninstall.bat
 
 ================================================================================
 

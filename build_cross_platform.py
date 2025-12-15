@@ -22,8 +22,12 @@ if sys.platform == 'win32':
     os.system('chcp 65001 >nul 2>&1')
 
 from build_config import (
-    APP_NAME, APP_VERSION, CURRENT_OS, CURRENT_PLATFORM, 
-    NSIS_CONFIG, DMG_CONFIG
+    APP_NAME,
+    APP_VERSION,
+    CURRENT_OS,
+    CURRENT_PLATFORM,
+    NSIS_CONFIG,
+    DMG_CONFIG,
 )
 
 def run_command(cmd, cwd=None):
@@ -173,16 +177,41 @@ def create_windows_installer():
         print("[INFO] Creating installer without custom icon")
     
     # Create NSIS script
+    # Use a stable registry key (no version) so new installs can detect and uninstall old ones
+    reg_key = NSIS_CONFIG['registry_key']
+    product_name = NSIS_CONFIG['product_name']
+    display_version = NSIS_CONFIG['version']
+    app_name = NSIS_CONFIG['app_name']
+
+    # Create installer filename from product name (replace spaces with underscores)
+    installer_filename = product_name.replace(' ', '_') + '_Setup.exe'
+    
     nsis_script = f'''
 !include "MUI2.nsh"
 
-Name "{NSIS_CONFIG['name']}"
-OutFile "{APP_NAME.replace(' ', '_')}_v{APP_VERSION}_Setup.exe"
+Name "{product_name}"
+OutFile "{installer_filename}"
 InstallDir "{NSIS_CONFIG['install_dir']}"
 RequestExecutionLevel admin
 
 !define MUI_ABORTWARNING
 {icon_line}
+
+;--------------------------------
+; Auto-uninstall previous version (if any)
+;--------------------------------
+
+Function .onInit
+    ReadRegStr $0 HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{reg_key}" "UninstallString"
+    StrCmp $0 "" done
+    MessageBox MB_OKCANCEL|MB_ICONINFORMATION "A previous version of {product_name} is installed.$\\n$\\nThe old version will be uninstalled before installing the new version." IDOK do_uninstall IDCANCEL done
+
+  do_uninstall:
+    ; Run previous uninstaller silently if supported
+    ExecWait '$0'
+
+  done:
+FunctionEnd
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
@@ -198,23 +227,27 @@ RequestExecutionLevel admin
 
 Section "Install"
     SetOutPath "$INSTDIR"
-    File /r "dist\\{APP_NAME}\\*"
+    File /r "dist\\{app_name}\\*"
     
-    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "DisplayName" "{APP_NAME}"
-    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "UninstallString" "$INSTDIR\\Uninstall.exe"
+    ; Uninstall registry entries (used for Apps & Features)
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{reg_key}" "DisplayName" "{product_name}"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{reg_key}" "DisplayVersion" "{display_version}"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{reg_key}" "Publisher" "{NSIS_CONFIG['publisher']}"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{reg_key}" "UninstallString" "$INSTDIR\\Uninstall.exe"
     WriteUninstaller "$INSTDIR\\Uninstall.exe"
     
-    CreateDirectory "$SMPROGRAMS\\{APP_NAME}"
-    CreateShortCut "$SMPROGRAMS\\{APP_NAME}\\{APP_NAME}.lnk" "$INSTDIR\\{APP_NAME}.exe"
-    CreateShortCut "$DESKTOP\\{APP_NAME}.lnk" "$INSTDIR\\{APP_NAME}.exe"
+    ; Shortcuts use user-friendly product name but point to the real EXE
+    CreateDirectory "$SMPROGRAMS\\{product_name}"
+    CreateShortCut "$SMPROGRAMS\\{product_name}\\{product_name}.lnk" "$INSTDIR\\{app_name}.exe"
+    CreateShortCut "$DESKTOP\\{product_name}.lnk" "$INSTDIR\\{app_name}.exe"
 SectionEnd
 
 Section "Uninstall"
     Delete "$INSTDIR\\Uninstall.exe"
     RMDir /r "$INSTDIR"
-    RMDir /r "$SMPROGRAMS\\{APP_NAME}"
-    Delete "$DESKTOP\\{APP_NAME}.lnk"
-    DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}"
+    RMDir /r "$SMPROGRAMS\\{product_name}"
+    Delete "$DESKTOP\\{product_name}.lnk"
+    DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{reg_key}"
 SectionEnd
 '''
     
@@ -230,7 +263,7 @@ SectionEnd
     # Run NSIS compiler
     try:
         run_command('makensis installer.nsi')
-        print(f"[SUCCESS] Windows installer created: {APP_NAME.replace(' ', '_')}_v{APP_VERSION}_Setup.exe")
+        print(f"[SUCCESS] Windows installer created: {installer_filename}")
     except:
         print("[ERROR] NSIS not found. Please install NSIS from https://nsis.sourceforge.io/")
         create_simple_zip_installer()
@@ -306,15 +339,37 @@ Created with PyQt5 and PyInstaller
     
     print(f"[SUCCESS] ZIP installer created: {zip_name}")
 
-def create_installer():
-    """Create installer for current platform"""
+def create_installer(target: str = "all"):
+    """
+    Create installer for current platform.
+    
+    Parameters
+    ----------
+    target : str
+        "exe"  -> Windows NSIS installer (only valid on Windows)
+        "dmg"  -> macOS DMG installer (only valid on macOS)
+        "all"  -> Default behavior for the current OS
+    """
+    target = (target or "all").lower()
+    
     if CURRENT_OS == 'windows':
-        create_windows_installer()
+        if target in ('exe', 'all'):
+            create_windows_installer()
+        else:
+            print(f"[INFO] Skipping installer creation on Windows for target='{target}'")
     elif CURRENT_OS == 'darwin':
-        create_dmg_installer()
+        if target in ('dmg', 'all'):
+            create_dmg_installer()
+        else:
+            print(f"[INFO] Skipping installer creation on macOS for target='{target}'")
     elif CURRENT_OS == 'linux':
-        create_appimage()
+        # For now Linux only has the generic AppImage/ZIP path
+        if target in ('all',):
+            create_appimage()
+        else:
+            print(f"[INFO] Skipping installer creation on Linux for target='{target}'")
     else:
+        print(f"[WARNING] Unsupported OS '{CURRENT_OS}', creating simple ZIP installer instead")
         create_simple_zip_installer()
 
 def create_dmg_installer():
@@ -378,7 +433,15 @@ def create_appimage():
 
 def main():
     """Main build process"""
-    print(f"[BUILD] Building {APP_NAME} v{APP_VERSION} for {CURRENT_OS}")
+    # Parse optional build target: exe | dmg | all
+    target = "all"
+    if len(sys.argv) > 1:
+        target = sys.argv[1].lower()
+        if target not in ("exe", "dmg", "all"):
+            print(f"[WARNING] Unknown build target '{target}', using 'all' instead.")
+            target = "all"
+
+    print(f"[BUILD] Building {APP_NAME} v{APP_VERSION} for {CURRENT_OS} (target={target})")
     print("=" * 50)
     
     # Check if we're in the right directory
@@ -394,7 +457,7 @@ def main():
         create_app_bundle()
         
         # Step 3: Create platform-specific installer
-        create_installer()
+        create_installer(target)
         
         print("\\n" + "=" * 50)
         print("[SUCCESS] Build completed successfully!")

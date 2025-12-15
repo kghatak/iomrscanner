@@ -116,6 +116,9 @@ echo "========================================="
 echo "Testing Pandas..."
 python -c "import pandas as pd; print(f'   ✅ Pandas {pd.__version__}')" || echo "   ❌ Pandas failed"
 
+echo "Testing openpyxl..."
+python -c "import openpyxl; print(f'   ✅ openpyxl {openpyxl.__version__}')" || echo "   ❌ openpyxl failed"
+
 echo "Testing PyTorch..."
 python -c "import torch; print(f'   ✅ PyTorch {torch.__version__}')" || echo "   ❌ PyTorch failed"
 

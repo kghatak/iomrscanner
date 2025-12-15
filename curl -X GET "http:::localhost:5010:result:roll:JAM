@@ -1,0 +1,43 @@
+curl -X GET "http://localhost:5010/result/roll/JAMB24040031" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2023-jgm"
+
+curl -X GET "http://localhost:5010/result/roll/SURI-I25070063" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2025-brb"
+
+
+https://bigmandev03.azurewebsites.net/result/MHDB20257F14
+
+
+
+curl -X GET "https://bigmandev03.azurewebsites.net/result/roll/SURI-I25070063" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2025-brb"
+
+
+curl -X GET "https://bigmandev03.azurewebsites.net/result/roll/SURI-I2507%20-%200063" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2025-brb"
+
+
+curl -X GET "https://bigmandev03.azurewebsites.net/result/roll/VAM824040031" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2025-brb"
+
+
+curl -X GET "https://bigmandev03.azurewebsites.net/result/roll/JAMB24040027" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2023-jgm"
+
+
+
+curl -X GET "https://bigmandev03.azurewebsites.net/exam?_end=25&_start=0&" \
+-H "Content-Type: application/json" \
+-H "user-tenantid: c2025-brb"
+
+
+
+Count Wet Land Patches and Bounding Boxes: You are given a 2D grid (map) representing an uneven field, where each cell is either: 0 → dry land 1 → wet land A wet patch is a connected group of 1s. Two cells are considered connected if they share a side or a corner (8-directional connectivity). Your task is to: Find the number of distinct wet patches. For each patch, determine the bounding box that minimally contains all the 1s of that patch.
+
+

@@ -40,6 +40,7 @@ test_pdfs/
 .vscode/
 /test_pipeline
 /test_single_pipeline
+pipeline_results_*/
 
 
 # PyInstaller

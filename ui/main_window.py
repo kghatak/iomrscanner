@@ -278,46 +278,128 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to extract images: {error_details}")
 
     def upload_result_csv(self):
-        """Upload CSV result file and display in new tab."""
+        """Upload CSV/Excel result file and display in new tab."""
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
         import csv
         import os
         
-        # Open file dialog for CSV selection
-        csv_path, _ = QFileDialog.getOpenFileName(
+        # Open file dialog for CSV/Excel selection
+        file_path, _ = QFileDialog.getOpenFileName(
             self, 
-            "Select CSV Result File", 
+            "Select Result File", 
             "", 
-            "CSV Files (*.csv);;All Files (*)"
+            "CSV or Excel Files (*.csv *.xlsx *.xls);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
         )
         
-        if not csv_path:
+        if not file_path:
             return
         
         try:
-            # Read CSV file
-            results_data = []
-            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                
-                # Validate required columns
-                required_columns = ['examname', 'class', 'questionIndex', 'correctchoice', 'questiontype']
-                if not all(col in reader.fieldnames for col in required_columns):
-                    missing_cols = [col for col in required_columns if col not in reader.fieldnames]
+            # Load tabular data (supports CSV + Excel)
+            ext = os.path.splitext(file_path)[1].lower()
+            rows = []
+            headers = []
+
+            if ext in ('.xlsx', '.xls'):
+                try:
+                    import pandas as pd
+                except ImportError:
                     QMessageBox.warning(
-                        self, 
-                        "Invalid CSV Format", 
-                        f"Missing required columns: {', '.join(missing_cols)}\n\n"
-                        f"Required format: examname, class, questionIndex, correctchoice, questiontype"
+                        self,
+                        "Missing Dependency",
+                        "Reading Excel files requires pandas.\n\n"
+                        "Install with:\n pip install pandas openpyxl"
                     )
                     return
                 
-                # Read all rows
-                for row in reader:
-                    results_data.append(row)
+                try:
+                    df = pd.read_excel(file_path)
+                except ImportError:
+                    QMessageBox.warning(
+                        self,
+                        "Missing Dependency",
+                        "Reading Excel files requires the openpyxl package.\n\n"
+                        "Install with:\n pip install openpyxl"
+                    )
+                    return
+                headers = [str(col) for col in df.columns]
+                rows = df.to_dict(orient='records')
+            else:
+                with open(file_path, 'r', newline='', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    
+                    if not reader.fieldnames:
+                        QMessageBox.warning(self, "Invalid CSV Format", "The CSV file has no header row.")
+                        return
+                    
+                    headers = reader.fieldnames
+                    rows = list(reader)
+
+            if not rows:
+                QMessageBox.warning(self, "Empty File", "The file contains no data.")
+                return
+
+            # Support both legacy and new formats; match columns case-insensitively
+            field_map = {name.lower(): name for name in headers}
+            required_new = [
+                'examname', 'tenant', 'class', 'questionindex',
+                'correctchoice', 'questioncategory', 'marks', 'wrongquestion'
+            ]
+            required_legacy = ['examname', 'class', 'questionindex', 'correctchoice', 'questiontype']
+
+            def has_columns(required_cols):
+                return all(col in field_map for col in required_cols)
+
+            format_used = None
+            if has_columns(required_new):
+                format_used = 'new'
+            elif has_columns(required_legacy):
+                format_used = 'legacy'
+            else:
+                missing_new = [col for col in required_new if col not in field_map]
+                missing_legacy = [col for col in required_legacy if col not in field_map]
+                QMessageBox.warning(
+                    self,
+                    "Invalid File Format",
+                    "Missing required columns.\n\n"
+                    f"New format needs: {', '.join(required_new)}\n"
+                    f"Legacy format needs: {', '.join(required_legacy)}\n\n"
+                    f"Missing (new): {', '.join(missing_new)}\n"
+                    f"Missing (legacy): {', '.join(missing_legacy)}"
+                )
+                return
+
+            # Normalize rows to a consistent schema so the table header is stable
+            results_data = []
+            for row in rows:
+                if format_used == 'new':
+                    normalized = {
+                        'examname': row.get(field_map['examname'], ''),
+                        'tenant': row.get(field_map['tenant'], ''),
+                        'class': row.get(field_map['class'], ''),
+                        'questionIndex': row.get(field_map['questionindex'], ''),
+                        'correctchoice': row.get(field_map['correctchoice'], ''),
+                        'questionCategory': row.get(field_map['questioncategory'], ''),
+                        'Marks': row.get(field_map['marks'], ''),
+                        'WrongQuestion': row.get(field_map['wrongquestion'], '')
+                    }
+                else:  # legacy
+                    normalized = {
+                        'examname': row.get(field_map['examname'], ''),
+                        'class': row.get(field_map['class'], ''),
+                        'questionIndex': row.get(field_map['questionindex'], ''),
+                        'correctchoice': row.get(field_map['correctchoice'], ''),
+                        # Keep legacy column but surface it as questionCategory for consistency
+                        'questionCategory': row.get(field_map['questiontype'], ''),
+                    }
+                    # Carry over any extra legacy columns if present
+                    for extra_key in ('marks', 'wrongquestion'):
+                        if extra_key in field_map:
+                            normalized[extra_key.capitalize() if extra_key == 'marks' else 'WrongQuestion'] = row.get(field_map[extra_key], '')
+                results_data.append(normalized)
             
             if not results_data:
-                QMessageBox.warning(self, "Empty File", "The CSV file contains no data.")
+                QMessageBox.warning(self, "Empty File", "The file contains no data.")
                 return
             
             # Add uploaded results to the results panel
@@ -327,14 +409,14 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, 
                 "Upload Successful", 
-                f"Successfully uploaded {len(results_data)} result records from {os.path.basename(csv_path)}"
+                f"Successfully uploaded {len(results_data)} result records from {os.path.basename(file_path)}"
             )
             
             # Switch to the uploaded results tab
             self.results_panel.show_uploaded_results_tab()
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to upload CSV file: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to upload result file: {str(e)}")
 
     def open_review_tool(self):
         """Open the ML Dataset Manual Review Tool as a popup window"""
