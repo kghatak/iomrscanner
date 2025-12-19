@@ -20,6 +20,16 @@ else:
     if sys.platform == 'win32':
         print("[WARNING] poppler_bundle not found. Run download_poppler_windows.py first for bundled Poppler.")
 
+# Check if tesseract_bundle exists (for Windows bundling)
+tesseract_bundle_path = 'tesseract_bundle'
+
+if os.path.exists(tesseract_bundle_path) and sys.platform == 'win32':
+    print(f"[OK] Including Tesseract bundle from: {tesseract_bundle_path}")
+    datas_list.append((tesseract_bundle_path, 'tesseract_bundle'))
+else:
+    if sys.platform == 'win32':
+        print("[WARNING] tesseract_bundle not found. Run download_tesseract_windows.py first for bundled Tesseract.")
+
 a = Analysis(
     ['main.py'],
     pathex=[],

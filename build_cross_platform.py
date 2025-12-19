@@ -99,16 +99,71 @@ def download_poppler_for_windows():
         print(f"      {sys.executable} download_poppler_windows.py")
         return False
 
+def bundle_tesseract_for_windows():
+    """Bundle Tesseract OCR for Windows"""
+    if CURRENT_OS != 'windows':
+        return True
+    
+    print("[BUILD] Checking for Tesseract bundle...")
+    
+    # Check if tesseract_bundle already exists
+    if os.path.exists('tesseract_bundle'):
+        print("✅ Tesseract bundle found")
+        return True
+    
+    print("⚠️  Tesseract bundle not found. Creating bundle...")
+    print("[INFO] This will copy Tesseract from your system installation")
+    
+    try:
+        # Run the bundle script (don't use run_command as it exits on error)
+        result = subprocess.run(
+            [sys.executable, 'download_tesseract_windows.py'],
+            capture_output=True,
+            text=True,
+            check=False  # Don't raise exception, check return code
+        )
+        
+        # Print output from the script
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        
+        if result.returncode == 0 and os.path.exists('tesseract_bundle'):
+            print("✅ Tesseract bundled and ready for bundling")
+            return True
+        else:
+            print("❌ Tesseract bundling failed")
+            print("[INFO] Make sure Tesseract is installed on this machine")
+            print("[INFO] You can manually create the bundle by running:")
+            print(f"      {sys.executable} download_tesseract_windows.py")
+            return False
+    except Exception as e:
+        print(f"❌ Error bundling Tesseract: {e}")
+        print("[INFO] You can manually create the bundle by running:")
+        print(f"      {sys.executable} download_tesseract_windows.py")
+        return False
+
 def create_app_bundle():
     """Create the application bundle using PyInstaller"""
     print(f"[BUILD] Creating {CURRENT_OS} app bundle with PyInstaller...")
     
-    # Download Poppler for Windows if needed
+    # Download/bundle dependencies for Windows if needed
     if CURRENT_OS == 'windows':
+        # Bundle Poppler
         if not download_poppler_for_windows():
             print("⚠️  Warning: Building without bundled Poppler")
             print("    Users will need to install Poppler separately")
             response = input("Continue without bundled Poppler? (y/n): ")
+            if response.lower() != 'y':
+                print("[CANCELLED] Build cancelled by user")
+                sys.exit(1)
+        
+        # Bundle Tesseract
+        if not bundle_tesseract_for_windows():
+            print("⚠️  Warning: Building without bundled Tesseract")
+            print("    Users will need to install Tesseract separately")
+            response = input("Continue without bundled Tesseract? (y/n): ")
             if response.lower() != 'y':
                 print("[CANCELLED] Build cancelled by user")
                 sys.exit(1)

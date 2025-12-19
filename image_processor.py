@@ -30,6 +30,10 @@ except ValueError as e:
     PYTESSERACT_AVAILABLE = False
 
 import os
+import sys
+import glob
+import shutil
+import platform
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 from PIL import Image, ImageDraw, ImageFont
@@ -48,6 +52,108 @@ ALL_DEPENDENCIES_AVAILABLE = OPENCV_AVAILABLE and NUMPY_AVAILABLE and PYTESSERAC
 
 # Check if core dependencies for ArUco processing are available
 ARUCO_DEPENDENCIES_AVAILABLE = OPENCV_AVAILABLE and NUMPY_AVAILABLE
+
+
+def find_tesseract_path():
+    """
+    Find Tesseract OCR installation on Windows.
+    Returns a tuple: (found: bool, path: str or None)
+    - If found in a specific location: (True, path)
+    - If found in system PATH: (True, None)
+    - If not found: (False, None)
+    
+    On non-Windows platforms, always returns (True, None) as Tesseract
+    should be installed via system package manager.
+    """
+    # Non-Windows platforms use system Tesseract
+    if platform.system() != 'Windows':
+        return (True, None)
+    
+    # Windows-specific logic
+    # First, check if tesseract is in system PATH
+    if shutil.which("tesseract"):
+        return (True, None)  # Found in PATH, no need to specify path
+    
+    # Get the application directory
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Common installation locations for Tesseract on Windows
+    # Priority order: bundled > user installation > system installation
+    possible_paths = [
+        # Check bundled Tesseract first (highest priority)
+        os.path.join(app_dir, "tesseract_bundle", "bin"),
+        os.path.join(app_dir, "_internal", "tesseract_bundle", "bin"),  # PyInstaller internal
+        os.path.join(app_dir, "tesseract", "bin"),
+        os.path.join(app_dir, "_internal", "tesseract", "bin"),  # PyInstaller internal
+        # Check in application directory (for manual bundling)
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "tesseract_bundle", "bin"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "tesseract", "bin"),
+        # Check in common user installation directories
+        r"C:\Program Files\Tesseract-OCR",
+        r"C:\Program Files (x86)\Tesseract-OCR",
+        r"C:\Tesseract-OCR",
+        r"C:\Program Files\Tesseract-OCR\bin",
+        r"C:\Program Files (x86)\Tesseract-OCR\bin",
+        r"C:\Tesseract-OCR\bin",
+    ]
+    
+    # Try to find tesseract.exe in these locations
+    for path_pattern in possible_paths:
+        # Handle both direct paths and glob patterns
+        paths_to_check = [path_pattern]
+        if '*' in path_pattern:
+            paths_to_check = glob.glob(path_pattern)
+        
+        for path in paths_to_check:
+            if os.path.exists(path):
+                # Check if tesseract.exe exists in this path or a bin subdirectory
+                tesseract_exe = os.path.join(path, "tesseract.exe")
+                if os.path.exists(tesseract_exe):
+                    return (True, path)
+                # Also check bin subdirectory
+                bin_path = os.path.join(path, "bin")
+                if os.path.exists(bin_path):
+                    tesseract_exe = os.path.join(bin_path, "tesseract.exe")
+                    if os.path.exists(tesseract_exe):
+                        return (True, bin_path)
+    
+    return (False, None)  # Not found
+
+
+def configure_tesseract():
+    """
+    Configure pytesseract to use the correct Tesseract path on Windows.
+    This should be called once when the module is imported.
+    """
+    if not PYTESSERACT_AVAILABLE:
+        return False
+    
+    if platform.system() == 'Windows':
+        found, tesseract_path = find_tesseract_path()
+        if found and tesseract_path:
+            # Set the path to tesseract.exe
+            tesseract_exe = os.path.join(tesseract_path, "tesseract.exe")
+            if os.path.exists(tesseract_exe):
+                pytesseract.pytesseract.tesseract_cmd = tesseract_exe
+                return True
+        elif found:
+            # Found in PATH, no need to configure
+            return True
+        else:
+            # Not found - will fail when OCR is used
+            return False
+    
+    return True  # On non-Windows, assume it's in PATH
+
+
+# Configure Tesseract on module import
+if PYTESSERACT_AVAILABLE:
+    configure_tesseract()
 
 
 class ImageProcessor:
@@ -237,6 +343,19 @@ class ImageProcessor:
         """
         if not PYTESSERACT_AVAILABLE:
             return "OCR Error: pytesseract not available or has dependency issues"
+        
+        # Check if Tesseract is configured (especially on Windows)
+        if platform.system() == 'Windows':
+            try:
+                # Try to get the configured path
+                tesseract_cmd = getattr(pytesseract.pytesseract, 'tesseract_cmd', None)
+                if not tesseract_cmd or not os.path.exists(tesseract_cmd):
+                    # Reconfigure Tesseract
+                    if not configure_tesseract():
+                        return ("OCR Error: Tesseract is not installed or it's not in your PATH. "
+                               "Please install Tesseract OCR from https://github.com/UB-Mannheim/tesseract/wiki")
+            except Exception:
+                pass
             
         try:
             # Read image with PIL for OCR
@@ -251,8 +370,16 @@ class ImageProcessor:
             
             return extracted_text.strip()
             
+        except pytesseract.TesseractNotFoundError:
+            return ("OCR Error: tesseract is not installed or it's not in your PATH. "
+                   "Please install Tesseract OCR from https://github.com/UB-Mannheim/tesseract/wiki")
         except Exception as e:
-            return f"OCR Error: {str(e)}"
+            error_msg = str(e)
+            # Provide more helpful error message for common Tesseract issues
+            if "tesseract" in error_msg.lower() or "not found" in error_msg.lower():
+                return ("OCR Error: tesseract is not installed or it's not in your PATH. "
+                       "Please install Tesseract OCR from https://github.com/UB-Mannheim/tesseract/wiki")
+            return f"OCR Error: {error_msg}"
     
     def create_annotated_image(self, image_path: str, output_path: str, 
                              detection_info: Dict, extracted_text: str = "") -> bool:
