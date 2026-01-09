@@ -153,6 +153,181 @@ class PipelineManager:
             for stage in self.stages
         ]
     
+    def _validate_and_load_uploaded_results(self, initial_context: Dict[str, Any], context: Dict[str, Any]) -> bool:
+        """
+        Validate and load uploaded results data into context.
+        
+        Args:
+            initial_context: Initial context containing uploaded_results_data and other parameters
+            context: Main context dictionary to update
+            
+        Returns:
+            True if validation passed and data loaded, False otherwise
+        """
+        class_name = self.__class__.__name__
+        
+        print(f"[{class_name}] ========================================")
+        print(f"[{class_name}] Validating Uploaded Results")
+        print(f"[{class_name}] ========================================")
+        
+        # Check if uploaded results data exists
+        uploaded_results_data = initial_context.get('uploaded_results_data') if initial_context else None
+        
+        if not uploaded_results_data:
+            print(f"[{class_name}] ℹ️  No uploaded results data found. Pipeline will proceed without answer key.")
+            return True  # Not an error - just proceed without answer key
+        
+        print(f"[{class_name}] Uploaded results data found: {len(uploaded_results_data)} rows")
+        
+        # Validate columns
+        expected_columns = ['examname', 'class', 'questionIndex', 'correctchoice', 
+                          'questionCategory', 'Marks', 'WrongQuestion']
+        
+        if len(uploaded_results_data) == 0:
+            print(f"[{class_name}] ❌ ERROR: Uploaded results data is empty")
+            return False
+        
+        # Check first row for column names
+        first_row = uploaded_results_data[0]
+        actual_columns = list(first_row.keys())
+        
+        # Check for required columns (case-insensitive)
+        missing_columns = []
+        column_map = {col.lower(): col for col in actual_columns}
+        
+        for expected_col in expected_columns:
+            if expected_col.lower() not in column_map:
+                missing_columns.append(expected_col)
+        
+        if missing_columns:
+            print(f"[{class_name}] ❌ ERROR: Missing required columns: {missing_columns}")
+            print(f"[{class_name}] Found columns: {actual_columns}")
+            return False
+        
+        print(f"[{class_name}] ✅ All required columns found")
+        
+        # Validate class number match
+        context_class_number = initial_context.get('class_number') if initial_context else None
+        if context_class_number is None:
+            print(f"[{class_name}] ⚠️  WARNING: No class_number in context. Skipping class validation.")
+        else:
+            # Get class from first row (assuming all rows have same class)
+            uploaded_class = str(first_row.get(column_map.get('class', 'class'), '')).strip()
+            context_class_str = str(context_class_number).strip()
+            
+            # Try to match class values (handle leading zeros)
+            uploaded_class_int = None
+            try:
+                uploaded_class_int = int(uploaded_class)
+            except (ValueError, TypeError):
+                pass
+            
+            context_class_int = None
+            try:
+                context_class_int = int(context_class_str)
+            except (ValueError, TypeError):
+                pass
+            
+            # Compare as integers if both can be converted, otherwise as strings
+            if uploaded_class_int is not None and context_class_int is not None:
+                if uploaded_class_int != context_class_int:
+                    print(f"[{class_name}] ❌ ERROR: Class mismatch!")
+                    print(f"[{class_name}]    Expected (from dropdown): {context_class_int}")
+                    print(f"[{class_name}]    Found (in uploaded data): {uploaded_class_int}")
+                    return False
+            elif uploaded_class != context_class_str:
+                print(f"[{class_name}] ❌ ERROR: Class mismatch!")
+                print(f"[{class_name}]    Expected (from dropdown): {context_class_str}")
+                print(f"[{class_name}]    Found (in uploaded data): {uploaded_class}")
+                return False
+            
+            print(f"[{class_name}] ✅ Class validation passed: {context_class_int or context_class_str}")
+        
+        # Validate row count matches num_questions
+        context_num_questions = initial_context.get('num_questions') if initial_context else None
+        if context_num_questions is None:
+            print(f"[{class_name}] ⚠️  WARNING: No num_questions in context. Skipping row count validation.")
+        else:
+            num_rows = len(uploaded_results_data)
+            if num_rows != context_num_questions:
+                print(f"[{class_name}] ❌ ERROR: Row count mismatch!")
+                print(f"[{class_name}]    Expected (from dropdown): {context_num_questions}")
+                print(f"[{class_name}]    Found (in uploaded data): {num_rows}")
+                return False
+            
+            print(f"[{class_name}] ✅ Row count validation passed: {num_rows} rows")
+        
+        # Transform data into ordered array
+        print(f"[{class_name}] Transforming uploaded results data...")
+        answer_key = []
+        
+        # Sort by questionIndex to ensure correct order
+        try:
+            sorted_data = sorted(uploaded_results_data, 
+                               key=lambda x: int(str(x.get(column_map.get('questionindex', 'questionIndex'), 0)) or 0))
+        except (ValueError, TypeError) as e:
+            print(f"[{class_name}] ⚠️  WARNING: Could not sort by questionIndex: {e}")
+            sorted_data = uploaded_results_data
+        
+        for row in sorted_data:
+            # Get values with fallbacks
+            correctchoice_str = str(row.get(column_map.get('correctchoice', 'correctchoice'), '')).strip().upper()
+            questioncategory = str(row.get(column_map.get('questioncategory', 'questionCategory'), '')).strip()
+            marks_str = str(row.get(column_map.get('marks', 'Marks'), '0')).strip()
+            wrongquestion_str = str(row.get(column_map.get('wrongquestion', 'WrongQuestion'), '0')).strip()
+            
+            # Convert A,B,C,D to 1,2,3,4 (0-indexed: 0,1,2,3)
+            choice_to_index = {'A': 0, 'B': 1, 'C': 2, 'D': 3}
+            correctchoice_index = choice_to_index.get(correctchoice_str, -1)
+            
+            if correctchoice_index == -1:
+                print(f"[{class_name}] ⚠️  WARNING: Invalid correctchoice '{correctchoice_str}'. Expected A, B, C, or D.")
+                # Try to parse as number (0-3 or 1-4)
+                try:
+                    num_choice = int(correctchoice_str)
+                    if 1 <= num_choice <= 4:
+                        correctchoice_index = num_choice - 1  # Convert 1-4 to 0-3
+                    elif 0 <= num_choice <= 3:
+                        correctchoice_index = num_choice
+                    else:
+                        correctchoice_index = -1
+                except (ValueError, TypeError):
+                    correctchoice_index = -1
+            
+            # Convert marks and wrongquestion to int/bool
+            try:
+                marks = int(marks_str) if marks_str else 0
+            except (ValueError, TypeError):
+                marks = 0
+            
+            try:
+                wrongquestion = bool(int(wrongquestion_str)) if wrongquestion_str else False
+            except (ValueError, TypeError):
+                wrongquestion = False
+            
+            answer_key.append({
+                'correctchoice': correctchoice_index,
+                'questioncategory': questioncategory,
+                'marks': marks,
+                'wrongquestion': wrongquestion
+            })
+        
+        print(f"[{class_name}] ✅ Transformed {len(answer_key)} questions into answer key")
+        
+        # Log first 10 elements
+        print(f"[{class_name}] First 10 answer key elements:")
+        for i, item in enumerate(answer_key[:10], 1):
+            print(f"[{class_name}]   [{i}] correctchoice={item['correctchoice']}, "
+                  f"questioncategory='{item['questioncategory']}', "
+                  f"marks={item['marks']}, wrongquestion={item['wrongquestion']}")
+        
+        # Load into context
+        context['uploaded_answer_key'] = answer_key
+        print(f"[{class_name}] ✅ Uploaded answer key loaded into context")
+        print(f"[{class_name}] ========================================")
+        
+        return True
+    
     def process_image(self, image_path: str, output_folder: str, initial_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Process an image through all pipeline stages.
@@ -213,6 +388,25 @@ class PipelineManager:
         
         try:
             pipeline_start_time = time.time()
+            
+            # Validate and load uploaded results if available
+            uploaded_results_loaded = self._validate_and_load_uploaded_results(initial_context, context)
+            if uploaded_results_loaded is False:
+                # Validation failed - stop processing
+                error_msg = "Uploaded results validation failed"
+                print(f"[{class_name}] ❌ PIPELINE FAILED: {error_msg}")
+                print(f"[{class_name}] Stopping pipeline processing")
+                
+                pipeline_result["error_stage"] = "uploaded_results_validation"
+                pipeline_result["error_message"] = error_msg
+                pipeline_result["total_time_seconds"] = time.time() - pipeline_start_time
+                
+                print(f"[{class_name}] Calling handle_pipeline_error()")
+                if self.stages:
+                    return self.stages[0].handle_pipeline_error(image_path, output_folder, pipeline_result)
+                else:
+                    return pipeline_result
+            
             # Process through each stage
             for stage_index, stage in enumerate(self.stages, 1):
                 stage_name = stage.get_stage_name()

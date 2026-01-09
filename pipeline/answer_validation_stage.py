@@ -184,6 +184,23 @@ class AnswerValidationStage(PipelineStage):
             print(f"[{class_name}]   Skipped: {skipped_count}")
             print(f"[{class_name}]   First 10 answers: {final_answer[:10]}")
             
+            # Step 4: Validate answers with uploaded answer key if available
+            answer_validation_result = None
+            uploaded_answer_key = context.get('uploaded_answer_key')
+            if uploaded_answer_key:
+                print(f"[{class_name}] ========================================")
+                print(f"[{class_name}] Step 4: Validate Answers with Answer Key")
+                answer_validation_result = self._validate_answers_with_answer_key(
+                    final_answer, uploaded_answer_key, roll_number, context
+                )
+                if answer_validation_result:
+                    print(f"[{class_name}] ✅ Answer validation completed")
+                    print(f"[{class_name}] Validation result: {answer_validation_result}")
+                else:
+                    print(f"[{class_name}] ⚠️  Answer validation completed but no result generated")
+            else:
+                print(f"[{class_name}] ℹ️  No uploaded answer key found. Skipping answer validation.")
+            
             # Create result
             result = self.create_stage_result(
                 success=True,
@@ -194,6 +211,17 @@ class AnswerValidationStage(PipelineStage):
                 final_answer=final_answer,
                 marked_circles_highlighted=len(marked_circles)
             )
+            
+            # Add answer validation result to context if available
+            if answer_validation_result:
+                result['answer_validation_result'] = answer_validation_result
+            
+            # Step 5: Mark correct/wrong answers with ticks and crosses on visualization images
+            # (Can be commented out if marking is not needed)
+            if uploaded_answer_key and answer_validation_result:
+                self._mark_answer_correctness_on_images(
+                    final_answer, uploaded_answer_key, context, image
+                )
             
             print(f"[{class_name}] ✅ SUCCESS: Answer validation complete")
             return result
@@ -269,4 +297,320 @@ class AnswerValidationStage(PipelineStage):
                     max_ratio = fill_ratios[idx]
                     max_idx = idx
             return max_idx
+    
+    def _validate_answers_with_answer_key(self, final_answer: List[int], uploaded_answer_key: List[Dict], 
+                                          roll_number: str, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Validate marked answers against uploaded answer key and calculate marks by category.
+        
+        Args:
+            final_answer: List of marked answers (indices 0-3 or -1 for skipped)
+            uploaded_answer_key: List of answer key entries with correctchoice, questioncategory, marks, wrongquestion
+            roll_number: Roll number of the student
+            context: Pipeline context to get tenant
+            
+        Returns:
+            Dictionary with {roll_number, tenant, questionCategory1: marks, questionCategory2: marks, ...}
+            or None if validation fails
+        """
+        class_name = self.__class__.__name__
+        
+        print(f"[{class_name}] _validate_answers_with_answer_key() called")
+        print(f"[{class_name}] Final answer count: {len(final_answer)}")
+        print(f"[{class_name}] Answer key count: {len(uploaded_answer_key)}")
+        
+        # Get tenant from context
+        tenant = context.get('tenant', '')
+        
+        # Initialize marks by category
+        marks_by_category = {}
+        
+        # Track statistics
+        correct_answers = 0
+        incorrect_answers = 0
+        skipped_answers = 0
+        wrong_questions_count = 0
+        
+        # Process each question
+        for question_idx in range(len(final_answer)):
+            marked_answer = final_answer[question_idx]
+            
+            # Skip if question not marked (marked_answer == -1)
+            if marked_answer == -1:
+                skipped_answers += 1
+                continue
+            
+            # Check if we have answer key for this question
+            if question_idx >= len(uploaded_answer_key):
+                print(f"[{class_name}] ⚠️  WARNING: No answer key entry for question {question_idx + 1}")
+                continue
+            
+            answer_key_entry = uploaded_answer_key[question_idx]
+            correctchoice = answer_key_entry.get('correctchoice', -1)
+            questioncategory = answer_key_entry.get('questioncategory', '').strip()
+            marks = answer_key_entry.get('marks', 0)
+            wrongquestion = answer_key_entry.get('wrongquestion', False)
+            
+            # Convert wrongquestion to boolean if it's an integer
+            if isinstance(wrongquestion, int):
+                wrongquestion = bool(wrongquestion)
+            
+            # Initialize category if not exists
+            if questioncategory:
+                if questioncategory not in marks_by_category:
+                    marks_by_category[questioncategory] = 0
+            
+            # Handle WrongQuestion == 1: If attempted, award full marks regardless of correctness
+            if wrongquestion:
+                if marked_answer != -1:
+                    # Question was attempted - award full marks
+                    wrong_questions_count += 1
+                    if questioncategory:
+                        marks_by_category[questioncategory] += marks
+                        print(f"[{class_name}] ✅ Question {question_idx + 1}: Wrong question but attempted! "
+                              f"Category: {questioncategory}, Full Marks: +{marks}")
+                    else:
+                        print(f"[{class_name}] ✅ Question {question_idx + 1}: Wrong question but attempted! "
+                              f"(No category), Full Marks: +{marks}")
+                    correct_answers += 1  # Count as correct for statistics
+                else:
+                    # Question was not attempted - skip
+                    wrong_questions_count += 1
+                    print(f"[{class_name}] ⚠️  Question {question_idx + 1} is marked as wrong question and not attempted. Skipping.")
+                continue
+            
+            # Normal validation: Check if marked answer matches correct choice
+            if marked_answer == correctchoice:
+                # Correct answer - add marks to category
+                correct_answers += 1
+                if questioncategory:
+                    marks_by_category[questioncategory] += marks
+                    print(f"[{class_name}] ✅ Question {question_idx + 1}: Correct! "
+                          f"Category: {questioncategory}, Marks: +{marks}")
+                else:
+                    print(f"[{class_name}] ✅ Question {question_idx + 1}: Correct! "
+                          f"(No category), Marks: +{marks}")
+            else:
+                # Incorrect answer
+                incorrect_answers += 1
+                print(f"[{class_name}] ❌ Question {question_idx + 1}: Incorrect. "
+                      f"Marked: {marked_answer}, Correct: {correctchoice}")
+        
+        # Prepare result JSON structure
+        validation_result = {
+            'roll_number': roll_number,
+            'tenant': tenant
+        }
+        
+        # Add marks for each category
+        for category, total_marks in marks_by_category.items():
+            validation_result[category] = total_marks
+        
+        # Log summary
+        print(f"[{class_name}] ========================================")
+        print(f"[{class_name}] Answer Validation Summary:")
+        print(f"[{class_name}]   Correct answers: {correct_answers}")
+        print(f"[{class_name}]   Incorrect answers: {incorrect_answers}")
+        print(f"[{class_name}]   Skipped answers: {skipped_answers}")
+        print(f"[{class_name}]   Wrong questions skipped: {wrong_questions_count}")
+        print(f"[{class_name}]   Marks by category:")
+        total_marks_obtained = 0
+        for category, marks in marks_by_category.items():
+            print(f"[{class_name}]     {category}: {marks} marks")
+            total_marks_obtained += marks
+        print(f"[{class_name}]   Total marks obtained: {total_marks_obtained}")
+        print(f"[{class_name}] ========================================")
+        
+        # Add total marks to result
+        validation_result['total_marks_obtained'] = total_marks_obtained
+        validation_result['correct_answers'] = correct_answers
+        validation_result['incorrect_answers'] = incorrect_answers
+        validation_result['skipped_answers'] = skipped_answers
+        
+        # Store in context
+        context['answer_validation_result'] = validation_result
+        print(f"[{class_name}] ✅ Answer validation result added to context")
+        
+        return validation_result
+    
+    def _mark_answer_correctness_on_images(self, final_answer: List[int], uploaded_answer_key: List[Dict],
+                                          context: Dict[str, Any], original_image: np.ndarray) -> None:
+        """
+        Mark correct answers with green ticks and wrong answers with red crosses on images.
+        This method can be commented out if visual marking is not needed.
+        
+        Args:
+            final_answer: List of marked answers (indices 0-3 or -1 for skipped)
+            uploaded_answer_key: List of answer key entries
+            context: Pipeline context containing grid data and image paths
+            original_image: Original image (for fallback if needed)
+        """
+        class_name = self.__class__.__name__
+        
+        print(f"[{class_name}] ========================================")
+        print(f"[{class_name}] Marking Answer Correctness on Images")
+        print(f"[{class_name}] ========================================")
+        
+        # Load visualization image
+        viz_image_path = context.get('visualization_image_path')
+        if not viz_image_path or not os.path.exists(viz_image_path):
+            print(f"[{class_name}] ⚠️  Visualization image not found. Skipping marking.")
+            return
+        
+        viz_image = cv2.imread(viz_image_path)
+        if viz_image is None:
+            print(f"[{class_name}] ⚠️  Could not load visualization image. Skipping marking.")
+            return
+        
+        print(f"[{class_name}] Loaded visualization image: {os.path.basename(viz_image_path)}")
+        
+        # Reconstruct question-to-circle mapping from grid data
+        question_circle_map = {}  # question_index -> (x, y, r_mean)
+        
+        question_idx = 0
+        for col_idx in range(1, 5):
+            grid_key = f"col{col_idx}_grid"
+            r_mean_key = f"r_mean_col_{col_idx}"
+            
+            grid_data = context.get(grid_key)
+            if not grid_data:
+                continue
+            
+            r_mean = context.get(r_mean_key, 16)
+            grid_circles = grid_data.get('grid_circles', [])
+            
+            # Each column has 25 questions, each with 4 circles
+            for q_in_col in range(25):
+                if question_idx >= len(final_answer):
+                    break
+                
+                # Get the marked answer for this question
+                marked_answer = final_answer[question_idx]
+                
+                # If question was marked, find the circle position
+                if marked_answer >= 0 and marked_answer < 4:
+                    start_idx = q_in_col * 4
+                    if start_idx + marked_answer < len(grid_circles):
+                        marked_circle = grid_circles[start_idx + marked_answer]
+                        question_circle_map[question_idx] = (marked_circle[0], marked_circle[1], r_mean)
+                
+                question_idx += 1
+        
+        print(f"[{class_name}] Mapped {len(question_circle_map)} marked questions to circle positions")
+        
+        # Mark correct and wrong answers
+        correct_count = 0
+        wrong_count = 0
+        
+        for question_idx in range(len(final_answer)):
+            marked_answer = final_answer[question_idx]
+            
+            # Skip if question not marked or no circle position found
+            if marked_answer == -1 or question_idx not in question_circle_map:
+                continue
+            
+            # Check if we have answer key for this question
+            if question_idx >= len(uploaded_answer_key):
+                continue
+            
+            answer_key_entry = uploaded_answer_key[question_idx]
+            correctchoice = answer_key_entry.get('correctchoice', -1)
+            wrongquestion = answer_key_entry.get('wrongquestion', False)
+            
+            # Convert wrongquestion to boolean if needed
+            if isinstance(wrongquestion, int):
+                wrongquestion = bool(wrongquestion)
+            
+            x, y, r_mean = question_circle_map[question_idx]
+            r_mean_int = int(round(r_mean))
+            
+            # Determine if answer is correct
+            is_correct = False
+            if wrongquestion:
+                # Wrong question: any attempt is considered correct
+                is_correct = True
+            elif marked_answer == correctchoice:
+                # Normal question: matches correct choice
+                is_correct = True
+            
+            # Draw tick or cross
+            if is_correct:
+                # Draw green tick (checkmark)
+                self._draw_tick(viz_image, x, y, r_mean_int, color=(0, 255, 0))
+                correct_count += 1
+            else:
+                # Draw red cross
+                self._draw_cross(viz_image, x, y, r_mean_int, color=(0, 0, 255))
+                wrong_count += 1
+        
+        # Save marked visualization image
+        print(f"[{class_name}] Saving visualization image with correctness marks...")
+        cv2.imwrite(viz_image_path, viz_image)
+        print(f"[{class_name}] ✅ Visualization image saved with {correct_count} ticks and {wrong_count} crosses")
+        
+        # Also mark the success image if it exists (it will be created later, but we can update the path)
+        # The success image is created from visualization image, so marks will already be there
+        # But let's also check if there's a success image path we should update
+        print(f"[{class_name}] Note: Success image will be created from marked visualization image")
+        print(f"[{class_name}] ========================================")
+    
+    def _draw_tick(self, image: np.ndarray, center_x: int, center_y: int, radius: int, color: tuple = (0, 255, 0), thickness: int = 3) -> None:
+        """
+        Draw a green tick (checkmark) at the specified position.
+        
+        Args:
+            image: Image to draw on
+            center_x: X coordinate of circle center
+            center_y: Y coordinate of circle center
+            radius: Radius of the circle (used to scale tick size)
+            color: Color in BGR format (default: green)
+            thickness: Line thickness
+        """
+        # Scale tick size based on circle radius
+        tick_size = max(8, int(radius * 0.6))
+        
+        # Draw checkmark: two lines forming a tick
+        # Start point (bottom-left of tick)
+        start_x = center_x - tick_size // 2
+        start_y = center_y + tick_size // 4
+        
+        # Middle point (middle-left)
+        mid_x = center_x - tick_size // 6
+        mid_y = center_y
+        
+        # End point (top-right of tick)
+        end_x = center_x + tick_size // 2
+        end_y = center_y - tick_size // 2
+        
+        # Draw the tick: two lines
+        cv2.line(image, (start_x, start_y), (mid_x, mid_y), color, thickness)
+        cv2.line(image, (mid_x, mid_y), (end_x, end_y), color, thickness)
+    
+    def _draw_cross(self, image: np.ndarray, center_x: int, center_y: int, radius: int, color: tuple = (0, 0, 255), thickness: int = 3) -> None:
+        """
+        Draw a red cross (X) at the specified position.
+        
+        Args:
+            image: Image to draw on
+            center_x: X coordinate of circle center
+            center_y: Y coordinate of circle center
+            radius: Radius of the circle (used to scale cross size)
+            color: Color in BGR format (default: red)
+            thickness: Line thickness
+        """
+        # Scale cross size based on circle radius
+        cross_size = max(8, int(radius * 0.6))
+        offset = cross_size // 2
+        
+        # Draw X: two diagonal lines
+        # Top-left to bottom-right
+        cv2.line(image, 
+                (center_x - offset, center_y - offset), 
+                (center_x + offset, center_y + offset), 
+                color, thickness)
+        # Top-right to bottom-left
+        cv2.line(image, 
+                (center_x + offset, center_y - offset), 
+                (center_x - offset, center_y + offset), 
+                color, thickness)
 

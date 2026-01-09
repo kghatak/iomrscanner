@@ -1240,6 +1240,11 @@ class ResultsPanel(QWidget):
         # Get and store parameters
         self.pipeline_parameters = dialog.get_parameters()
         
+        # Add uploaded results data if available
+        if hasattr(self, 'uploaded_results_data') and self.uploaded_results_data:
+            self.pipeline_parameters['uploaded_results_data'] = self.uploaded_results_data
+            self.add_to_processing_log(f"📋 Uploaded results data found: {len(self.uploaded_results_data)} rows")
+        
         # Get expected marker IDs from checkboxes
         expected_markers = []
         for i, checkbox in enumerate(self.marker_checkboxes, start=1):

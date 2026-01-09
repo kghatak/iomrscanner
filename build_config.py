@@ -5,7 +5,7 @@ Build configuration for Image Folder Analyzer
 import platform
 
 APP_NAME = "Bignan Mancha OMR Reader"
-APP_VERSION = "2.2.0"
+APP_VERSION = "3.0.0"
 # Windows-facing product name (what the user sees in Programs & Features / shortcuts)
 WINDOWS_PRODUCT_NAME = f"OMR Exam Reader {APP_VERSION}"
 APP_BUNDLE_ID = "com.bignanmancha.omr.reader"
