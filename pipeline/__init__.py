@@ -10,6 +10,7 @@ from .pipeline_stages import (
     OrientationCheckStage,
     RollNumberExtractionStage,
     OMRProcessingStage,
+    OMRProcessingSecondStage,
     OMRAnswerExtractionStage,
     APIUploadStage
 )
@@ -21,6 +22,7 @@ __all__ = [
     'OrientationCheckStage',
     'RollNumberExtractionStage',
     'OMRProcessingStage',
+    'OMRProcessingSecondStage',
     'OMRAnswerExtractionStage',
     'APIUploadStage'
 ]

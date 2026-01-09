@@ -9,10 +9,10 @@ Each stage inherits from a base class and can be easily added, removed, or modif
 import os
 import cv2
 import numpy as np
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Tuple, List
 import re
 import shutil
+import time
+from typing import Dict, Any, Optional, Tuple, List
 
 # Import base class
 from .base_stage import PipelineStage
@@ -23,6 +23,7 @@ from .orientation_check_stage import OrientationCheckStage
 from .roll_number_extraction_stage import RollNumberExtractionStage
 from .fetch_student_stage import FetchStudentStage
 from .omr_processing_stage import OMRProcessingStage
+from .omr_processing_second_stage import OMRProcessingSecondStage
 from .omr_answer_extraction_stage import OMRAnswerExtractionStage
 from .answer_validation_stage import AnswerValidationStage
 from .api_upload_stage import APIUploadStage
@@ -61,7 +62,8 @@ class PipelineManager:
             OrientationCheckStage(self.processor),
             RollNumberExtractionStage(self.processor),
             FetchStudentStage(self.processor),  # Fetch student data after roll number extraction
-            OMRProcessingStage(self.processor),
+            OMRProcessingStage(self.processor),  # Pass 1: Regular column detection
+            OMRProcessingSecondStage(self.processor),  # Pass 2: Estimate missing columns if needed
             OMRAnswerExtractionStage(self.processor),
             AnswerValidationStage(self.processor),  # Validate and detect answers
             APIUploadStage(self.processor)
@@ -151,13 +153,14 @@ class PipelineManager:
             for stage in self.stages
         ]
     
-    def process_image(self, image_path: str, output_folder: str) -> Dict[str, Any]:
+    def process_image(self, image_path: str, output_folder: str, initial_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Process an image through all pipeline stages.
         
         Args:
             image_path: Path to the image to process
             output_folder: Base output folder for results
+            initial_context: Optional initial context values to merge into context (tenant, zone, class_number, year, etc.)
             
         Returns:
             Dictionary with processing results and stage information
@@ -179,10 +182,12 @@ class PipelineManager:
             "filename": filename,
             "success": False,
             "stages": {},
+            "stage_times": {},
             "error_stage": None,
             "error_message": None,
             "output_path": None,
-            "api_upload_success": False
+            "api_upload_success": False,
+            "total_time_seconds": None
         }
         
         print(f"[{class_name}] Pipeline result initialized")
@@ -193,6 +198,11 @@ class PipelineManager:
             "current_image_path": image_path
         }
         
+        # Merge initial context if provided
+        if initial_context:
+            context.update(initial_context)
+            print(f"[{class_name}] Initial context merged: {list(initial_context.keys())}")
+        
         print(f"[{class_name}] Context initialized: {context}")
         
         # Log initial context state
@@ -202,6 +212,7 @@ class PipelineManager:
         print(f"[{class_name}] ========================================\n")
         
         try:
+            pipeline_start_time = time.time()
             # Process through each stage
             for stage_index, stage in enumerate(self.stages, 1):
                 stage_name = stage.get_stage_name()
@@ -214,13 +225,17 @@ class PipelineManager:
                 print(f"[{class_name}] Current image path: {context['current_image_path']}")
                 print(f"[{class_name}] ========================================")
                 
-                # Process the stage
-                print(f"[{class_name}] Calling stage.process()...")
-                stage_result = stage.process(context["current_image_path"], context)
-                print(f"[{class_name}] Stage process() returned")
+                # Process the stage with timing
+                print(f"[{class_name}] Calling stage.run_with_timing()...")
+                stage_result = stage.run_with_timing(context["current_image_path"], context)
+                print(f"[{class_name}] Stage run_with_timing() returned")
                 print(f"[{class_name}] Stage result success: {stage_result.get('success')}")
+                print(f"[{class_name}] Stage elapsed time: {stage_result.get('elapsed_seconds', 0):.3f}s")
                 
                 pipeline_result["stages"][stage_name] = stage_result
+                # Store timing
+                if "elapsed_seconds" in stage_result:
+                    pipeline_result["stage_times"][stage_name] = stage_result["elapsed_seconds"]
                 print(f"[{class_name}] Stage result stored in pipeline_result")
                 
                 # Check if stage failed
@@ -233,6 +248,9 @@ class PipelineManager:
                     pipeline_result["error_stage"] = stage_name
                     pipeline_result["error_message"] = error_msg
                     pipeline_result["context"] = context  # Add context for roll number access
+                    if "stage_times" in context:
+                        pipeline_result["stage_times"] = context["stage_times"]
+                    pipeline_result["total_time_seconds"] = time.time() - pipeline_start_time
                     
                     print(f"[{class_name}] Calling handle_pipeline_error()")
                     return stage.handle_pipeline_error(image_path, output_folder, pipeline_result)
@@ -269,6 +287,9 @@ class PipelineManager:
             pipeline_result["success"] = True
             pipeline_result["output_path"] = context["current_image_path"]
             pipeline_result["api_upload_success"] = True
+            pipeline_result["total_time_seconds"] = time.time() - pipeline_start_time
+            if "stage_times" in context:
+                pipeline_result["stage_times"] = context["stage_times"]
             
             print(f"[{class_name}] Pipeline result marked as successful")
             

@@ -7,27 +7,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel, QMessageBox,
     QInputDialog, QLineEdit
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QSize
-from PyQt5.QtGui import QPixmap, QFont, QIcon
-
-
-class ImageLoadThread(QThread):
-    image_loaded = pyqtSignal(str, QPixmap)
-    
-    def __init__(self, image_paths):
-        super().__init__()
-        self.image_paths = image_paths
-        
-    def run(self):
-        for path in self.image_paths:
-            try:
-                pixmap = QPixmap(path)
-                if not pixmap.isNull():
-                    # Scale to smaller thumbnail size for narrow panel
-                    thumbnail = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    self.image_loaded.emit(path, thumbnail)
-            except Exception as e:
-                print(f"Error loading image {path}: {e}")
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QPixmap, QFont
 
 
 class ImagePanel(QWidget):
@@ -88,8 +69,7 @@ class ImagePanel(QWidget):
                 background-color: #f0f0f0;
             }
         """)
-        # Set icon size for thumbnails (smaller for narrow panel)
-        self.image_list.setIconSize(QSize(80, 80))
+        # Use a more compact view without icons for better memory management
         self.image_list.itemClicked.connect(self.on_image_selected)
         
         # Enable context menu
@@ -134,6 +114,54 @@ class ImagePanel(QWidget):
         self.folder_label.setText(f"📂 {os.path.basename(folder_path)}")
         self.refresh_button.setEnabled(True)
         self.load_images()
+    
+    def load_files(self, file_paths, folder_path=None):
+        """
+        Load specific files into the image panel.
+        
+        Args:
+            file_paths: List of full paths to image files
+            folder_path: Optional folder path for context (if None, uses directory of first file)
+        """
+        if not file_paths:
+            return
+        
+        # If folder_path not provided, use the directory of the first file
+        if folder_path is None:
+            folder_path = os.path.dirname(file_paths[0])
+        
+        self.current_folder = folder_path
+        
+        # Update folder label to show number of files
+        if len(file_paths) == 1:
+            self.folder_label.setText(f"📄 {os.path.basename(file_paths[0])}")
+        else:
+            self.folder_label.setText(f"📁 {len(file_paths)} files selected")
+        
+        self.refresh_button.setEnabled(False)  # Disable refresh for file selection mode
+        
+        # Clear existing items
+        self.image_list.clear()
+        
+        # Sort files by filename
+        file_paths_sorted = sorted(file_paths, key=lambda p: os.path.basename(p))
+        
+        # Add items for selected files (just filenames, no sizes)
+        for path in file_paths_sorted:
+            if not os.path.exists(path):
+                continue
+                
+            filename = os.path.basename(path)
+            item = QListWidgetItem(filename)
+            item.setData(Qt.UserRole, path)
+            self.image_list.addItem(item)
+        
+        # Select first item if available
+        if self.image_list.count() > 0:
+            self.image_list.setCurrentRow(0)
+            first_item = self.image_list.item(0)
+            if first_item:
+                self.on_image_selected(first_item)
         
     def load_images(self):
         if not self.current_folder:
@@ -144,12 +172,14 @@ class ImagePanel(QWidget):
         
         # Get image files
         try:
+            # Use listdir and filter efficiently
             files = os.listdir(self.current_folder)
-            image_files = [
+            
+            # Filter and sort in one pass for efficiency
+            image_files = sorted([
                 f for f in files 
                 if os.path.splitext(f.lower())[1] in self.image_extensions
-            ]
-            image_files.sort()
+            ])
             
             if not image_files:
                 item = QListWidgetItem("No images found in this folder")
@@ -157,52 +187,37 @@ class ImagePanel(QWidget):
                 self.image_list.addItem(item)
                 return
                 
-            # Get full paths
-            image_paths = [os.path.join(self.current_folder, f) for f in image_files]
+            # Batch add items to QListWidget for better performance with many files
+            # Use setUpdatesEnabled to prevent redraws during bulk insert
+            self.image_list.setUpdatesEnabled(False)
             
-            # Add placeholder items first
-            for i, path in enumerate(image_paths):
-                filename = os.path.basename(path)
-                item = QListWidgetItem(f"Loading... {filename}")
-                item.setData(Qt.UserRole, path)
-                self.image_list.addItem(item)
-            
-            # Load thumbnails in background thread
-            self.load_thread = ImageLoadThread(image_paths)
-            self.load_thread.image_loaded.connect(self.on_thumbnail_loaded)
-            self.load_thread.start()
+            try:
+                # Process in batches and allow UI to breathe
+                from PyQt5.QtWidgets import QApplication
+                batch_size = 50  # Process 50 items at a time
+                
+                for i, filename in enumerate(image_files):
+                    path = os.path.join(self.current_folder, filename)
+                    item = QListWidgetItem(filename)
+                    item.setData(Qt.UserRole, path)
+                    self.image_list.addItem(item)
+                    
+                    # Process events every batch to keep UI responsive
+                    if (i + 1) % batch_size == 0:
+                        QApplication.processEvents()
+                        
+            finally:
+                # Re-enable updates and refresh
+                self.image_list.setUpdatesEnabled(True)
+                self.image_list.repaint()
+                # Final processEvents to ensure UI is updated
+                from PyQt5.QtWidgets import QApplication
+                QApplication.processEvents()
             
         except Exception as e:
             item = QListWidgetItem(f"Error loading folder: {str(e)}")
             item.setFlags(Qt.NoItemFlags)
             self.image_list.addItem(item)
-            
-    @pyqtSlot(str, QPixmap)
-    def on_thumbnail_loaded(self, path, thumbnail):
-        # Find the item with this path and update it
-        for i in range(self.image_list.count()):
-            item = self.image_list.item(i)
-            if item.data(Qt.UserRole) == path:
-                filename = os.path.basename(path)
-                # Get file size
-                try:
-                    size = os.path.getsize(path)
-                    size_str = self.format_file_size(size)
-                    item.setText(f"{filename}\n{size_str}")
-                except:
-                    item.setText(filename)
-                
-                # Set thumbnail
-                item.setIcon(QIcon(thumbnail))
-                break
-                
-    def format_file_size(self, size_bytes):
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        else:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
             
     def on_image_selected(self, item):
         path = item.data(Qt.UserRole)

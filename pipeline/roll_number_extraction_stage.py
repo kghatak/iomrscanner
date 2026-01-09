@@ -102,6 +102,9 @@ class RollNumberExtractionStage(PipelineStage):
                 print(f"[{class_name}] ✅ SUCCESS: Roll number extracted: {roll_number}")
                 print(f"[{class_name}] Extracted string: '{extracted_text}'")
                 
+                # Validate and enforce expected prefix if provided
+                roll_number = self._validate_and_enforce_prefix(roll_number, context, class_name)
+                
                 # Mark roll number rectangle on visualization image
                 if roll_rect:
                     print(f"[{class_name}] Marking roll number rectangle on visualization image")
@@ -482,3 +485,74 @@ class RollNumberExtractionStage(PipelineStage):
         
         print(f"[{class_name}] ❌ No roll number found with any pattern")
         return None
+    
+    def _validate_and_enforce_prefix(self, roll_number: str, context: Dict[str, Any], class_name: str) -> str:
+        """
+        Validate extracted roll number prefix against expected prefix from context.
+        If they don't match, enforce the expected prefix.
+        
+        Args:
+            roll_number: The extracted roll number
+            context: Pipeline context containing expected_roll_number_prefix
+            class_name: Class name for logging
+            
+        Returns:
+            The roll number with enforced prefix if needed
+        """
+        # Get expected prefix from context
+        expected_prefix = context.get('expected_roll_number_prefix')
+        
+        if not expected_prefix:
+            print(f"[{class_name}] ⚠️ No expected_roll_number_prefix found in context, skipping prefix validation")
+            return roll_number
+        
+        print(f"[{class_name}] ====== Prefix Validation ======")
+        print(f"[{class_name}] Expected prefix: '{expected_prefix}'")
+        print(f"[{class_name}] Extracted roll number: '{roll_number}'")
+        
+        # Determine the actual prefix from extracted roll number
+        # Prefix format is: <zone><year two digit><class two digit>
+        # We need to extract the prefix part (everything before the dash if there's a dash, or a certain length)
+        actual_prefix = None
+        
+        # If roll number contains a dash, prefix is everything before the dash
+        if '-' in roll_number:
+            parts = roll_number.split('-', 1)
+            actual_prefix = parts[0]
+            suffix = parts[1] if len(parts) > 1 else ""
+            print(f"[{class_name}] Roll number contains dash: '{actual_prefix}' - '{suffix}'")
+        else:
+            # No dash - prefix length should match expected prefix length
+            expected_prefix_len = len(expected_prefix)
+            if len(roll_number) >= expected_prefix_len:
+                actual_prefix = roll_number[:expected_prefix_len]
+                suffix = roll_number[expected_prefix_len:]
+                print(f"[{class_name}] No dash found, using first {expected_prefix_len} chars as prefix: '{actual_prefix}'")
+                print(f"[{class_name}] Remaining suffix: '{suffix}'")
+            else:
+                print(f"[{class_name}] ⚠️ Roll number shorter than expected prefix, cannot validate")
+                return roll_number
+        
+        # Compare prefixes (case-insensitive)
+        if actual_prefix.upper() == expected_prefix.upper():
+            print(f"[{class_name}] ✅ Prefix matches expected prefix exactly")
+            print(f"[{class_name}] ================================")
+            return roll_number
+        else:
+            print(f"[{class_name}] ⚠️ Prefix mismatch detected!")
+            print(f"[{class_name}]   Expected: '{expected_prefix}'")
+            print(f"[{class_name}]   Actual:   '{actual_prefix}'")
+            print(f"[{class_name}] 🔧 Enforcing expected prefix...")
+            
+            # Enforce the expected prefix
+            if '-' in roll_number:
+                # Reconstruct with expected prefix and original suffix
+                enforced_roll_number = f"{expected_prefix}-{suffix}"
+            else:
+                # Replace prefix and keep the rest
+                enforced_roll_number = expected_prefix + suffix
+            
+            print(f"[{class_name}]   Original:  '{roll_number}'")
+            print(f"[{class_name}]   Enforced:  '{enforced_roll_number}'")
+            print(f"[{class_name}] ================================")
+            return enforced_roll_number

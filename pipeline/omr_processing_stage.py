@@ -45,17 +45,24 @@ class OMRProcessingStage(PipelineStage):
             print(f"[{class_name}] Detected markers from context: {detected_markers}")
             print(f"[{class_name}] Total markers detected: {len(detected_markers)}")
             
-            # Check if all 20 ArUco markers are detected
-            expected_markers = list(range(1, 21))  # Markers 1-20
-            print(f"[{class_name}] Checking for all 20 ArUco markers...")
+            # If in the context Roll number is already detected, then skip the markers 17,
+            # 18, 19, 20, else expect all the 20 markers. check if roll_number is not None or empty string.
+            if roll_number is not None and roll_number != "":
+                expected_markers = list(range(1, 17))  # Markers 1-16
+            else:
+                expected_markers = list(range(1, 21))  # Markers 1-20
+
+            # Check if all ArUco markers are detected as expected_markers.length    
+            print(f"[{class_name}] Checking for all {len(expected_markers)} ArUco markers...")
             print(f"[{class_name}] Expected markers: {expected_markers}")
             
             missing_markers = [m for m in expected_markers if m not in detected_markers]
             
-            if missing_markers:
-                error_msg = f"Not all 20 markers detected. Missing markers: {missing_markers}"
+            # if missing marker count is more than 8, fail, otherwise there is a chance to recover.
+            if len(missing_markers) > 8:
+                error_msg = f"Not all {len(expected_markers)} markers detected. Missing markers: {missing_markers}"
                 print(f"[{class_name}] ❌ ERROR: {error_msg}")
-                print(f"[{class_name}] Found {len(detected_markers)} markers, need 20")
+                print(f"[{class_name}] Found {len(detected_markers)} markers, need AT LEAST  {round(len(expected_markers)/2)} markers")
                 print(f"[{class_name}] Returning failure result")
                 return self.create_stage_result(
                     success=False,
@@ -63,7 +70,7 @@ class OMRProcessingStage(PipelineStage):
                     omr_data={}
                 )
             
-            print(f"[{class_name}] ✅ All 20 ArUco markers detected!")
+            print(f"[{class_name}] ✅ Minumum number of {len(expected_markers)} ArUco markers detected!")
             
             # Read the image
             print(f"[{class_name}] Reading image from disk")
@@ -103,6 +110,75 @@ class OMRProcessingStage(PipelineStage):
                 print(f"[{class_name}] New visualization image path: {viz_image_path}")
             
             print(f"[{class_name}] Visualization image shape: {viz_image.shape}")
+            
+            # Mark all detected markers with their IDs on the visualization image
+            print(f"[{class_name}] Marking detected markers on visualization image...")
+            marker_midpoints = detection_info.get('marker_midpoints', [])
+            detected_ids = detection_info.get('detected_ids', [])
+            
+            # Draw detected markers with their IDs
+            for i, marker_id in enumerate(detected_ids):
+                if i < len(marker_midpoints):
+                    midpoint = marker_midpoints[i]
+                    x, y = int(midpoint[0]), int(midpoint[1])
+                    # Draw a small circle at marker position
+                    cv2.circle(viz_image, (x, y), 10, (0, 255, 255), 2)  # Yellow circle
+                    # Draw marker ID text
+                    marker_text = f"ID:{marker_id}"
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.5
+                    thickness = 1
+                    (text_width, text_height), baseline = cv2.getTextSize(marker_text, font, font_scale, thickness)
+                    # Position text above the marker
+                    text_x = x - text_width // 2
+                    text_y = y - 15
+                    # Draw background rectangle for text
+                    cv2.rectangle(viz_image, 
+                                (text_x - 2, text_y - text_height - 2),
+                                (text_x + text_width + 2, text_y + baseline + 2),
+                                (0, 0, 0), -1)  # Black background
+                    # Draw text in white
+                    cv2.putText(viz_image, marker_text, (text_x, text_y),
+                               font, font_scale, (255, 255, 255), thickness)
+                    print(f"[{class_name}]   Marked marker {marker_id} at ({x}, {y})")
+            
+            # Display missing markers at the top of the visualization image
+            if missing_markers:
+                print(f"[{class_name}] Adding missing markers text at top of image...")
+                missing_text = f"Missing Markers: {', '.join(map(str, missing_markers))}"
+                font = cv2.FONT_HERSHEY_DUPLEX
+                font_scale = 0.8
+                thickness = 2
+                text_color = (0, 0, 255)  # Red color for missing markers
+                bg_color = (255, 255, 255)  # White background
+                
+                # Get text size
+                (text_width, text_height), baseline = cv2.getTextSize(missing_text, font, font_scale, thickness)
+                img_height, img_width = viz_image.shape[:2]
+                
+                # Position text at top center
+                text_x = (img_width - text_width) // 2
+                text_y = 40
+                
+                # Draw background rectangle for better visibility
+                padding = 10
+                cv2.rectangle(viz_image,
+                            (text_x - padding, text_y - text_height - padding),
+                            (text_x + text_width + padding, text_y + baseline + padding),
+                            bg_color, -1)  # White background
+                
+                # Draw border around background
+                cv2.rectangle(viz_image,
+                            (text_x - padding, text_y - text_height - padding),
+                            (text_x + text_width + padding, text_y + baseline + padding),
+                            text_color, 2)  # Red border
+                
+                # Draw text
+                cv2.putText(viz_image, missing_text, (text_x, text_y),
+                           font, font_scale, text_color, thickness)
+                print(f"[{class_name}]   Missing markers displayed: {missing_markers}")
+            else:
+                print(f"[{class_name}]   No missing markers - all expected markers detected!")
             
             # Define all 4 columns with their marker IDs
             columns_config = [

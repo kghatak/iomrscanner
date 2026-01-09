@@ -1,0 +1,54 @@
+================================================================================
+  INSTALLING TESSERACT OCR FOR OMR EXAM READER (Windows)
+================================================================================
+
+If you see the error: "OCR Error: tesseract is not installed or it's not 
+in your PATH", follow these steps:
+
+STEP 1: Download Tesseract OCR
+-------------------------------
+1. Go to: https://github.com/UB-Mannheim/tesseract/wiki
+2. Download the latest Windows installer (usually: tesseract-ocr-w64-setup-5.x.x.exe)
+
+STEP 2: Install Tesseract
+--------------------------
+1. Run the downloaded installer
+2. During installation, check the option "Add Tesseract to PATH" (recommended)
+3. Install to the default location: C:\Program Files\Tesseract-OCR
+4. Complete the installation
+
+STEP 3: Restart the Application
+--------------------------------
+1. Close OMR Exam Reader completely
+2. Open OMR Exam Reader again
+3. OCR should now work!
+
+================================================================================
+
+TROUBLESHOOTING:
+----------------
+
+Problem: "tesseract is not recognized" in Command Prompt
+Solution: Tesseract is not in PATH, but that's okay! The application will 
+         automatically find it if installed to: C:\Program Files\Tesseract-OCR
+
+Problem: Application still shows error after installation
+Solution: 
+  1. Make sure Tesseract is installed to: C:\Program Files\Tesseract-OCR
+  2. Verify the folder contains "tesseract.exe"
+  3. Close and restart the application
+
+VERIFY INSTALLATION:
+--------------------
+1. Open File Explorer
+2. Go to: C:\Program Files\Tesseract-OCR
+3. You should see "tesseract.exe" and a "tessdata" folder
+4. If these exist, installation is correct!
+
+================================================================================
+
+That's it! Once Tesseract is installed to the default location, the 
+application will automatically detect it. No additional configuration needed.
+
+================================================================================
+

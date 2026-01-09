@@ -140,12 +140,17 @@ def configure_tesseract():
             tesseract_exe = os.path.join(tesseract_path, "tesseract.exe")
             if os.path.exists(tesseract_exe):
                 pytesseract.pytesseract.tesseract_cmd = tesseract_exe
+                print(f"[Tesseract] Configured: {tesseract_exe}")
                 return True
+            else:
+                print(f"[Tesseract] Path found but tesseract.exe missing: {tesseract_exe}")
         elif found:
             # Found in PATH, no need to configure
+            print("[Tesseract] Found in system PATH")
             return True
         else:
             # Not found - will fail when OCR is used
+            print("[Tesseract] Not found in any location - OCR will fail")
             return False
     
     return True  # On non-Windows, assume it's in PATH
@@ -588,13 +593,14 @@ class ImageProcessor:
         """Get the current list of expected ArUco marker IDs"""
         return self.expected_markers.copy()
 
-    def process_image_pipeline(self, image_path: str, output_folder: str) -> Dict:
+    def process_image_pipeline(self, image_path: str, output_folder: str, initial_context: Dict = None) -> Dict:
         """
         Comprehensive pipeline for processing OMR images using modular stages.
         
         Args:
             image_path: Path to the image to process
             output_folder: Base output folder for results
+            initial_context: Optional initial context values (tenant, zone, class_number, year, etc.)
             
         Returns:
             Dictionary with processing results and stage information
@@ -608,7 +614,7 @@ class ImageProcessor:
                 "stages": {}
             }
         
-        return self.pipeline_manager.process_image(image_path, output_folder)
+        return self.pipeline_manager.process_image(image_path, output_folder, initial_context)
     
     def get_pipeline_stages_info(self) -> List[Dict[str, str]]:
         """

@@ -401,6 +401,7 @@ class OMRAnswerExtractionStage(PipelineStage):
         """
         Group circles into a 4x25 grid based on X and Y positions.
         
+        Uses only normal circles (excludes outliers) to build the grid structure.
         Uses hierarchical clustering based on 2*r_mean threshold:
         - Circles with X positions < 2*r_mean apart belong to same X group (expect 4 groups)
         - Circles with Y positions < 2*r_mean apart belong to same Y group (expect 25 groups)
@@ -417,18 +418,18 @@ class OMRAnswerExtractionStage(PipelineStage):
         
         print(f"[{class_name}] _group_circles_into_grid() called for column {col_number}")
         
-        # Combine normal and outlier circles for grouping
+        # Use only normal circles for grid grouping (exclude outliers to avoid interference)
         normal_circles = circles_dict.get('normal', [])
         outlier_circles = circles_dict.get('outliers', [])
-        all_circles = normal_circles + outlier_circles
+        all_circles = normal_circles  # Only use normal circles for grid structure
         
         if len(all_circles) == 0:
-            print(f"[{class_name}] No circles to group")
+            print(f"[{class_name}] No normal circles to group")
             return None
         
-        print(f"[{class_name}] Grouping {len(all_circles)} circles (threshold: 2*r_mean = {2*r_mean:.2f})")
+        print(f"[{class_name}] Grouping {len(all_circles)} normal circles (excluding {len(outlier_circles)} outliers, threshold: 2*r_mean = {2*r_mean:.2f})")
         
-        # Extract X and Y positions
+        # Extract X and Y positions from normal circles only
         x_positions = np.array([x for x, y, r in all_circles])
         y_positions = np.array([y for x, y, r in all_circles])
         
@@ -441,7 +442,7 @@ class OMRAnswerExtractionStage(PipelineStage):
         
         # Group Y positions (expect 25 groups for questions 1-25 or 26-50, etc.)
         y_groups = self._group_positions(y_positions, 2 * r_mean)
-        print(f"[{class_name}] Found {len(y_groups)} Y groups (expected ~25)")
+        print(f"[{class_name}] Found {len(y_groups)} Y groups (expected 25)")
         
         # Calculate mean positions for each group
         x_means = [np.mean(group) for group in x_groups]

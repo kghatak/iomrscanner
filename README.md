@@ -60,7 +60,7 @@ python build_cross_platform.py
 - 🍎 **macOS** - DMG installer
 - 🐧 **Linux** - AppImage (planned)
 
-For detailed build instructions, see [BUILD_GUIDE.md](BUILD_GUIDE.md)
+For detailed build instructions, see [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md)
 
 ## 📁 Project Structure
 
@@ -74,7 +74,11 @@ For detailed build instructions, see [BUILD_GUIDE.md](BUILD_GUIDE.md)
 │   ├── main_window.py         # Main application window
 │   ├── image_panel.py         # Left panel - image list
 │   └── results_panel.py       # Right panel - analysis results
-└── BUILD_GUIDE.md            # Detailed build instructions
+└── docs/                      # Documentation files
+    ├── BUILD_GUIDE.md         # Detailed build instructions
+    ├── WINDOWS_INSTALLER_GUIDE.md
+    ├── PIPELINE_TESTING_GUIDE.md
+    └── ...                    # Other documentation
 ```
 
 ## 🛠️ Development
@@ -108,7 +112,7 @@ python main.py
 ```
 
 ### Building for Distribution
-See [BUILD_GUIDE.md](BUILD_GUIDE.md) for platform-specific instructions.
+See [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) for platform-specific instructions.
 
 ## 📋 Usage
 

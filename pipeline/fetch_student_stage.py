@@ -7,6 +7,7 @@ This stage fetches student data from the backend API after roll number extractio
 
 import os
 import json
+import time
 import requests
 from typing import Optional, Dict, Any
 from .base_stage import PipelineStage
@@ -21,9 +22,11 @@ class FetchStudentStage(PipelineStage):
         self.base_url = "https://bigmandev03.azurewebsites.net"
         # self.base_url = "http://localhost:5010"
         self.endpoint = "/result/roll"
+        # Default tenant (will be overridden from context)
+        self.default_tenant = "c2023-jgm"
         self.headers = {
             "Content-Type": "application/json",
-            "user-tenantid": "c2023-jgm"
+            "user-tenantid": self.default_tenant
         }
     
     def get_stage_name(self) -> str:
@@ -55,25 +58,52 @@ class FetchStudentStage(PipelineStage):
             
             print(f"[{class_name}] Roll number found: {roll_number}")
             
+            # Get tenant from context (default to c2023-jgm if not provided)
+            tenant = context.get('tenant', self.default_tenant)
+            print(f"[{class_name}] Using tenant from context: {tenant}")
+            
+            # Update headers with tenant from context
+            headers = {
+                "Content-Type": "application/json",
+                "user-tenantid": tenant
+            }
+            
             # URL encode the roll number for the API call
             import urllib.parse
             encoded_roll_number = urllib.parse.quote(roll_number, safe='')
             api_url = f"{self.base_url}{self.endpoint}/{encoded_roll_number}"
             
             print(f"[{class_name}] API URL: {api_url}")
-            print(f"[{class_name}] Headers: {self.headers}")
+            print(f"[{class_name}] Headers: {headers}")
             
-            # Make the API call
+            # Make the API call with retry logic for 404
             print(f"[{class_name}] Making API request...")
+            max_retries = 1  # Retry once for 404
+            retry_count = 0
+            response = None
+            
             try:
-                response = requests.get(
-                    api_url,
-                    headers=self.headers,
-                    timeout=30  # 30 second timeout
-                )
-                
-                print(f"[{class_name}] API Response Status: {response.status_code}")
-                print(f"[{class_name}] API Response Headers: {dict(response.headers)}")
+                while retry_count <= max_retries:
+                    response = requests.get(
+                        api_url,
+                        headers=headers,
+                        timeout=30  # 30 second timeout
+                    )
+                    
+                    print(f"[{class_name}] API Response Status: {response.status_code}")
+                    print(f"[{class_name}] API Response Headers: {dict(response.headers)}")
+                    
+                    # If 404 and we haven't retried yet, wait and retry
+                    if response.status_code == 404 and retry_count < max_retries:
+                        retry_count += 1
+                        print(f"[{class_name}] ⚠️ Received 404, retrying (attempt {retry_count}/{max_retries})...")
+                        print(f"[{class_name}] Waiting 1 second before retry...")
+                        time.sleep(1)  # Wait 1 second before retry
+                        print(f"[{class_name}] 🔄 Retrying API request...")
+                        continue  # Retry the request
+                    
+                    # Break out of loop if not 404 or if we've already retried
+                    break
                 
                 # Check if request was successful
                 if response.status_code == 200:
@@ -166,7 +196,11 @@ class FetchStudentStage(PipelineStage):
                         )
                 
                 elif response.status_code == 404:
-                    print(f"[{class_name}] ❌ ERROR: Student not found (404)")
+                    # This means we got 404 after retry(ies)
+                    if retry_count > 0:
+                        print(f"[{class_name}] ❌ ERROR: Student not found (404) after {retry_count} retry attempt(s)")
+                    else:
+                        print(f"[{class_name}] ❌ ERROR: Student not found (404)")
                     print(f"[{class_name}] Response content: {response.text}")
                     
                     # Write error response to error file
@@ -175,7 +209,8 @@ class FetchStudentStage(PipelineStage):
                         'error': 'Student not found',
                         'roll_number': roll_number,
                         'url': api_url,
-                        'response_text': response.text
+                        'response_text': response.text,
+                        'retry_count': retry_count
                     }
                     self._write_json_to_file(error_data, roll_number, context, "error")
                     
@@ -188,7 +223,8 @@ class FetchStudentStage(PipelineStage):
                             'success': False,
                             'url': api_url,
                             'roll_number': roll_number,
-                            'error': 'Student not found'
+                            'error': 'Student not found',
+                            'retry_count': retry_count
                         }
                     )
                 

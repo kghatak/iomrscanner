@@ -6,6 +6,7 @@ This module contains the abstract base class for all pipeline stages.
 """
 
 import os
+import time
 import cv2
 from abc import ABC, abstractmethod
 from typing import Dict, Any
@@ -73,6 +74,27 @@ class PipelineStage(ABC):
             "stage_description": self.stage_description
         }
         result.update(kwargs)
+        return result
+
+    def run_with_timing(self, image_path: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the stage while measuring elapsed time.
+
+        Adds:
+            - elapsed_seconds: float seconds spent in this stage
+            - context['stage_times'][stage_name]: elapsed_seconds
+        """
+        start_time = time.time()
+        result = self.process(image_path, context)
+        elapsed = time.time() - start_time
+
+        # Attach timing to result
+        result["elapsed_seconds"] = elapsed
+
+        # Store timing in context aggregate
+        stage_times = context.setdefault("stage_times", {})
+        stage_times[self.stage_name] = elapsed
+
         return result
     
     def log_context(self, context: Dict[str, Any], prefix: str = ""):

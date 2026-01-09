@@ -1,11 +1,61 @@
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMenuBar, QAction
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMenuBar, QAction,
+    QProgressDialog, QMessageBox, QFileDialog
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QIcon
 
 from .image_panel import ImagePanel
 from .results_panel import ResultsPanel
+
+
+class PDFExtractionWorker(QThread):
+    """Worker thread for extracting images from PDF"""
+    progress_updated = pyqtSignal(int, str)  # progress percentage, status message
+    finished = pyqtSignal(list, str)  # image_paths, output_folder
+    error = pyqtSignal(str)  # error message
+    
+    def __init__(self, pdf_path, output_folder):
+        super().__init__()
+        self.pdf_path = pdf_path
+        self.output_folder = output_folder
+    
+    def run(self):
+        """Extract images from PDF"""
+        import os
+        import sys
+        
+        try:
+            # Import the PDF utilities module
+            # Get the project root (ui/main_window.py -> go up 2 levels)
+            current_dir = os.path.dirname(os.path.abspath(__file__))  # ui/
+            project_root = os.path.dirname(current_dir)  # pyqt/
+            sys.path.insert(0, project_root)
+            from pdf_utils import convert_pdf_with_poppler
+            
+            # Step 1: Convert PDF to images
+            self.progress_updated.emit(10, "Converting PDF to images...")
+            images = convert_pdf_with_poppler(self.pdf_path)
+            
+            total_pages = len(images)
+            image_paths = []
+            
+            # Step 2: Save images
+            for i, img in enumerate(images):
+                progress = 10 + int((i / total_pages) * 80)  # 10% to 90%
+                status = f"Saving page {i+1} of {total_pages}..."
+                self.progress_updated.emit(progress, status)
+                
+                img_path = os.path.join(self.output_folder, f"page_{i+1}.png")
+                img.save(img_path, "PNG")
+                image_paths.append(img_path)
+            
+            # Step 3: Complete
+            self.progress_updated.emit(100, f"Extracted {len(image_paths)} images successfully")
+            self.finished.emit(image_paths, self.output_folder)
+            
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class MainWindow(QMainWindow):
@@ -92,7 +142,8 @@ class MainWindow(QMainWindow):
         
         # Connect signals
         self.folder_selected.connect(self.image_panel.load_folder)
-        self.folder_selected.connect(self.results_panel.analyze_folder)
+        # Also set current_folder in results_panel when folder is selected
+        self.folder_selected.connect(lambda folder: setattr(self.results_panel, 'current_folder', folder))
         self.image_panel.image_selected.connect(self.results_panel.show_image_details)
         
         # Connect results panel folder loading to image panel
@@ -111,11 +162,18 @@ class MainWindow(QMainWindow):
         open_folder_action.triggered.connect(self.open_folder)
         file_menu.addAction(open_folder_action)
         
-        # Open PDF action
-        open_pdf_action = QAction('Open PDF', self)
-        open_pdf_action.setStatusTip('Open a PDF and extract images from pages')
-        open_pdf_action.triggered.connect(self.open_pdf_and_extract_images)
-        file_menu.addAction(open_pdf_action)
+        # Open files action
+        open_files_action = QAction('Open &Files', self)
+        open_files_action.setShortcut('Ctrl+Shift+O')
+        open_files_action.setStatusTip('Open one or more image files')
+        open_files_action.triggered.connect(self.open_files)
+        file_menu.addAction(open_files_action)
+        
+        # Process PDF action
+        process_pdf_action = QAction('Process PDF', self)
+        process_pdf_action.setStatusTip('Split PDF into PNG images and save to folder')
+        process_pdf_action.triggered.connect(self.process_pdf)
+        file_menu.addAction(process_pdf_action)
         
         # Upload Result action
         upload_result_action = QAction('Upload Result', self)
@@ -186,6 +244,42 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f'Loading folder: {folder}')
             self.folder_selected.emit(folder)
             self.statusBar().showMessage(f'Loaded: {folder}')
+    
+    def open_files(self):
+        """Open one or more image files"""
+        import os
+        
+        # Open file dialog for multiple files
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Image Files",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.tiff *.webp);;PNG Files (*.png);;All Files (*)"
+        )
+        
+        if not file_paths:
+            return
+        
+        # Get unique directories from selected files
+        directories = set(os.path.dirname(path) for path in file_paths)
+        
+        # Determine folder path (use first file's directory as primary)
+        folder_path = os.path.dirname(file_paths[0])
+        
+        # Load files into image panel
+        self.image_panel.load_files(file_paths, folder_path)
+        
+        # Set current folder in results panel so pipeline processing knows where to look
+        self.results_panel.current_folder = folder_path
+        
+        # Update status
+        if len(file_paths) == 1:
+            self.statusBar().showMessage(f'Loaded: {os.path.basename(file_paths[0])}')
+        else:
+            if len(directories) == 1:
+                self.statusBar().showMessage(f'Loaded {len(file_paths)} file(s) from {os.path.basename(folder_path)}')
+            else:
+                self.statusBar().showMessage(f'Loaded {len(file_paths)} file(s) from {len(directories)} folder(s)')
             
     def refresh_current_folder(self):
         current_folder = self.image_panel.current_folder
@@ -209,73 +303,121 @@ class MainWindow(QMainWindow):
             "• Improved error handling and messages"
         )
         
-    def open_pdf_and_extract_images(self):
-        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+    def process_pdf(self):
+        """Process PDF: Split into PNG images and save to folder (no UI loading)"""
         import os
-        
-        # Import the PDF utilities module
         import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from pdf_utils import convert_pdf_with_poppler, get_poppler_install_instructions
         
-        pdf_path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
+        # Import the PDF utilities module for error handling
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from pdf_utils import get_poppler_install_instructions
+        
+        # Step 1: Select PDF file
+        pdf_path, _ = QFileDialog.getOpenFileName(self, "Select PDF to Process", "", "PDF Files (*.pdf)")
         if not pdf_path:
             return
         
+        # Step 2: Create output folder for extracted PNGs
         output_folder = os.path.splitext(pdf_path)[0] + "_pages"
         os.makedirs(output_folder, exist_ok=True)
         
-        try:
-            # Use the utility function that handles Poppler detection
-            images = convert_pdf_with_poppler(pdf_path)
-            
-            image_paths = []
-            for i, img in enumerate(images):
-                img_path = os.path.join(output_folder, f"page_{i+1}.png")
-                img.save(img_path, "PNG")
-                image_paths.append(img_path)
-            
+        # Step 3: Show progress dialog for PDF splitting
+        self.pdf_progress_dialog = QProgressDialog("Splitting PDF into images...", "Cancel", 0, 100, self)
+        self.pdf_progress_dialog.setWindowTitle("Processing PDF")
+        self.pdf_progress_dialog.setWindowModality(Qt.WindowModal)
+        self.pdf_progress_dialog.setMinimumDuration(0)
+        self.pdf_progress_dialog.setValue(0)
+        self.pdf_progress_dialog.setAutoClose(True)  # Auto-close when value reaches maximum
+        self.pdf_progress_dialog.setAutoReset(True)  # Reset when closed
+        
+        # Step 4: Create and start worker thread
+        self.pdf_worker = PDFExtractionWorker(pdf_path, output_folder)
+        self.pdf_worker.progress_updated.connect(self._update_pdf_progress)
+        self.pdf_worker.finished.connect(self._on_pdf_processing_finished)
+        self.pdf_worker.error.connect(self._on_pdf_extraction_error)
+        
+        # Handle cancel button
+        self.pdf_progress_dialog.canceled.connect(self.pdf_worker.terminate)
+        
+        # Start extraction
+        self.pdf_worker.start()
+        
+        # Show progress dialog (it will auto-close when finished or cancelled)
+        self.pdf_progress_dialog.exec_()
+        
+        # Clean up progress dialog reference
+        self.pdf_progress_dialog = None
+    
+    def _update_pdf_progress(self, progress, status):
+        """Update progress dialog during PDF extraction"""
+        if hasattr(self, 'pdf_progress_dialog') and self.pdf_progress_dialog:
+            self.pdf_progress_dialog.setValue(progress)
+            self.pdf_progress_dialog.setLabelText(status)
+    
+    def _on_pdf_processing_finished(self, image_paths, output_folder):
+        """Handle successful PDF processing - just show completion message, no UI loading"""
+        # Properly close the progress dialog by setting value to 100 first, then closing
+        if hasattr(self, 'pdf_progress_dialog') and self.pdf_progress_dialog:
+            self.pdf_progress_dialog.setValue(100)
+            self.pdf_progress_dialog.setLabelText("Complete!")
+            # Use QTimer to close it after a brief moment (allows final update to show)
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, self._close_pdf_progress_dialog)
+        
+        # Show success message with folder location (after progress closes)
+        from PyQt5.QtCore import QTimer
+        def show_message():
+            import os
             QMessageBox.information(
                 self, 
-                "PDF Extracted", 
-                f"Extracted {len(image_paths)} images to {output_folder}"
+                "PDF Processed Successfully", 
+                f"PDF split into {len(image_paths)} images.\n\n"
+                f"Images saved to:\n{output_folder}\n\n"
+                "Use 'Open Folder' menu to load these images."
             )
-            
-            # Load these images into the side panel and image panel
-            self.results_panel.analyze_folder(output_folder)
-            if hasattr(self, 'image_panel'):
-                self.image_panel.load_folder(output_folder)
-            
-            # Immediately start serial pipeline processing on the extracted images
-            # This processes one file end-to-end before moving to the next
-            if hasattr(self, 'results_panel'):
-                self.results_panel.start_pipeline_processing()
-                
-        except ImportError as e:
+            # Update status bar
+            self.statusBar().showMessage(f'PDF processed: {len(image_paths)} images saved to {os.path.basename(output_folder)}')
+        
+        QTimer.singleShot(200, show_message)
+    
+    def _close_pdf_progress_dialog(self):
+        """Close the PDF progress dialog properly"""
+        if hasattr(self, 'pdf_progress_dialog') and self.pdf_progress_dialog:
+            self.pdf_progress_dialog.accept()  # Use accept() to properly exit exec_() loop
+    
+    def _on_pdf_extraction_error(self, error_details):
+        """Handle PDF extraction error"""
+        import sys
+        import os
+        
+        # Close progress dialog
+        if hasattr(self, 'pdf_progress_dialog') and self.pdf_progress_dialog:
+            self.pdf_progress_dialog.accept()  # Use accept() to properly exit exec_() loop
+        
+        # Import get_poppler_install_instructions for error messages
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from pdf_utils import get_poppler_install_instructions
+        
+        if "Unable to get page count" in error_details or "poppler" in error_details.lower():
+            error_msg = (
+                f"Failed to extract images: {error_details}\n\n"
+                "This error typically means Poppler is not properly installed or configured.\n\n"
+                "Please ensure:\n"
+                "1. Poppler is installed on your system\n"
+                "2. The 'bin' folder is in your system PATH\n"
+                "3. You have restarted the application after installing Poppler\n\n"
+                + get_poppler_install_instructions()
+            )
+            QMessageBox.critical(self, "PDF Processing Error", error_msg)
+        elif "pdf2image" in error_details.lower() or "ImportError" in error_details:
             QMessageBox.critical(
                 self, 
                 "Missing Dependency", 
                 "Please install pdf2image:\n\npip install pdf2image\n\n"
                 "Also ensure Poppler is installed:\n\n" + get_poppler_install_instructions()
             )
-        except RuntimeError as e:
-            # Poppler not found error
-            QMessageBox.critical(self, "Poppler Not Found", str(e))
-        except Exception as e:
-            error_details = str(e)
-            if "Unable to get page count" in error_details or "poppler" in error_details.lower():
-                error_msg = (
-                    f"Failed to extract images: {error_details}\n\n"
-                    "This error typically means Poppler is not properly installed or configured.\n\n"
-                    "Please ensure:\n"
-                    "1. Poppler is installed on your system\n"
-                    "2. The 'bin' folder is in your system PATH\n"
-                    "3. You have restarted the application after installing Poppler\n\n"
-                    + get_poppler_install_instructions()
-                )
-                QMessageBox.critical(self, "PDF Extraction Error", error_msg)
-            else:
-                QMessageBox.critical(self, "Error", f"Failed to extract images: {error_details}")
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to extract images: {error_details}")
 
     def upload_result_csv(self):
         """Upload CSV/Excel result file and display in new tab."""

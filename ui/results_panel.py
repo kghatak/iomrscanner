@@ -5,9 +5,11 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, 
     QFrame, QGridLayout, QTextEdit, QTabWidget, QPushButton,
     QProgressBar, QMessageBox, QFileDialog, QCheckBox, QSpinBox,
-    QGroupBox, QFormLayout, QTableWidget, QTableWidgetItem
+    QGroupBox, QFormLayout, QTableWidget, QTableWidgetItem,
+    QDialog, QDialogButtonBox, QComboBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QThread, pyqtSignal
+from typing import Dict
 from PyQt5.QtGui import QPixmap, QFont
 from PIL import Image
 from PIL.ExifTags import TAGS
@@ -160,13 +162,284 @@ class ArUcoProcessingWorker(QThread):
             self.processing_finished.emit(results)
             
         except Exception as e:
-            error_msg = f"💥 CRITICAL ERROR during ArUco processing: {str(e)}"
+            error_msg = f"💥 CRITICAL ERROR during pipeline processing: {str(e)}"
             self.status_message.emit(error_msg)
             results = {
                 'total': 0, 'success': 0, 'failure': 0,
-                'message': f'Error during ArUco processing: {str(e)}'
+                'message': f'Error during pipeline processing: {str(e)}'
             }
             self.processing_finished.emit(results)
+
+
+class ProcessingLogDialog(QDialog):
+    """Dialog showing real-time processing logs"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pipeline Processing Log")
+        self.setMinimumSize(800, 600)
+        self.setModal(False)  # Non-modal so user can see it during processing
+        
+        layout = QVBoxLayout(self)
+        
+        # Title
+        title_label = QLabel("🔄 Pipeline Processing in Progress...")
+        title_label.setFont(QFont("Arial", 14, QFont.Bold))
+        layout.addWidget(title_label)
+        
+        # Status indicator
+        self.status_label = QLabel("Initializing...")
+        self.status_label.setStyleSheet("color: #2196F3; font-weight: bold; padding: 5px;")
+        layout.addWidget(self.status_label)
+        
+        # Log text area
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFont(QFont("Courier", 10))
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 2px solid #333;
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(self.log_text)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        layout.addWidget(self.progress_bar)
+        
+        # Button layout
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.close_button = QPushButton("Close")
+        self.close_button.setEnabled(False)  # Disabled during processing
+        self.close_button.clicked.connect(self.accept)
+        button_layout.addWidget(self.close_button)
+        
+        layout.addLayout(button_layout)
+        
+        # Keep reference to this dialog
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+    
+    def add_log(self, message):
+        """Add a log message to the dialog"""
+        self.log_text.append(message)
+        # Auto-scroll to bottom
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        # Process events to update UI immediately
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+    
+    def update_progress(self, value, text=""):
+        """Update progress bar"""
+        self.progress_bar.setValue(value)
+        if text:
+            self.progress_bar.setFormat(f"{text} - %p%")
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+    
+    def set_status(self, status, color="#2196F3"):
+        """Update status label"""
+        self.status_label.setText(status)
+        self.status_label.setStyleSheet(f"color: {color}; font-weight: bold; padding: 5px;")
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+    
+    def processing_complete(self):
+        """Called when processing is complete"""
+        self.set_status("✅ Processing Complete!", "#4CAF50")
+        self.progress_bar.setValue(100)
+        self.progress_bar.setFormat("Complete - 100%")
+        self.close_button.setEnabled(True)
+        self.add_log("\n" + "="*80)
+        self.add_log("✅ PROCESSING COMPLETED SUCCESSFULLY!")
+        self.add_log("="*80)
+    
+    def processing_error(self, error_msg):
+        """Called when processing encounters an error"""
+        self.set_status("❌ Processing Error", "#f44336")
+        self.close_button.setEnabled(True)
+        self.add_log("\n" + "="*80)
+        self.add_log(f"❌ PROCESSING ERROR: {error_msg}")
+        self.add_log("="*80)
+
+
+class PipelineParametersDialog(QDialog):
+    """Dialog for selecting pipeline processing parameters"""
+    
+    def __init__(self, parent=None, initial_values=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pipeline Processing Parameters")
+        # Make dialog 25% bigger: 400 * 1.25 = 500
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(400)
+        
+        # Zone mapping based on tenant
+        self.zone_mapping = {
+            'c2023-jgm': ['JAMB', 'GOP2', 'NAYA', 'GOP1', 'BIN1', 'BIN2', 'JGMM', 'JGMR', 'SANK'],
+            'c2025-brb': ['RAMP', 'DBRJ', 'SURI-I', 'AHMD', 'SNTH', 'MHDB', 'KIRN', 'PAKR', 'NLHT', 'MRRI', 'ILMB', 'MYRS', 'BOLP', 'SURII', 'SURI-II']
+        }
+        
+        # Default values
+        initial_values = initial_values or {}
+        default_tenant = initial_values.get('tenant', 'c2023-jgm')
+        default_zone = initial_values.get('zone', '')
+        default_class = initial_values.get('class_number', 1)
+        default_year = initial_values.get('year', 2025)
+        default_num_questions = initial_values.get('num_questions', 50)
+        default_max_marks = initial_values.get('max_marks', 100)
+        
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)  # Increased spacing
+        
+        # Font size 25% bigger (default is ~9pt, so 25% bigger is ~11.25pt, round to 11pt)
+        font = QFont()
+        font.setPointSize(11)
+        
+        # Container for form fields
+        form_container = QVBoxLayout()
+        form_container.setSpacing(15)
+        
+        # Helper function to create a row with left-aligned label and right-aligned combo
+        def create_form_row(label_text, combo_widget):
+            row_layout = QHBoxLayout()
+            label = QLabel(label_text + ":")
+            label.setFont(font)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            label.setMinimumWidth(180)  # Fixed width for labels
+            combo_widget.setFont(font)
+            combo_widget.setMinimumWidth(200)  # Minimum width for combo boxes
+            row_layout.addWidget(label)
+            row_layout.addStretch()  # Push combo to the right
+            row_layout.addWidget(combo_widget)
+            return row_layout
+        
+        # Year dropdown (FIRST)
+        self.year_combo = QComboBox()
+        self.year_combo.addItems(['2023', '2024', '2025'])
+        self.year_combo.setCurrentText(str(default_year))
+        self.year_combo.currentTextChanged.connect(self._update_roll_number_prefix)
+        form_container.addLayout(create_form_row("Year", self.year_combo))
+        
+        # Tenant dropdown
+        self.tenant_combo = QComboBox()
+        self.tenant_combo.addItems(['c2023-jgm', 'c2025-brb'])
+        self.tenant_combo.setCurrentText(default_tenant)
+        self.tenant_combo.currentTextChanged.connect(self._on_tenant_changed)
+        form_container.addLayout(create_form_row("Select Tenant", self.tenant_combo))
+        
+        # Zone dropdown
+        self.zone_combo = QComboBox()
+        self._update_zone_options(default_tenant)
+        if default_zone and default_zone in [self.zone_combo.itemText(i) for i in range(self.zone_combo.count())]:
+            self.zone_combo.setCurrentText(default_zone)
+        self.zone_combo.currentTextChanged.connect(self._update_roll_number_prefix)
+        form_container.addLayout(create_form_row("Select Zone", self.zone_combo))
+        
+        # Class number dropdown (pad with leading zero for single digits)
+        self.class_combo = QComboBox()
+        self.class_combo.addItems([f"{i:02d}" for i in range(1, 11)])
+        # Convert default_class to string with zero padding for matching
+        default_class_str = f"{default_class:02d}"
+        self.class_combo.setCurrentText(default_class_str)
+        self.class_combo.currentTextChanged.connect(self._update_roll_number_prefix)
+        form_container.addLayout(create_form_row("Class Number", self.class_combo))
+        
+        # Expected Roll Number Prefix (display only, auto-generated)
+        self.roll_prefix_label = QLabel()
+        self.roll_prefix_label.setFont(font)
+        self.roll_prefix_label.setStyleSheet("color: #666; font-style: italic;")
+        self._update_roll_number_prefix()  # Initial calculation
+        form_container.addLayout(create_form_row("Expected Roll Number Prefix", self.roll_prefix_label))
+        
+        # Number of questions dropdown (1-100)
+        self.num_questions_combo = QComboBox()
+        self.num_questions_combo.addItems([str(i) for i in range(1, 101)])
+        self.num_questions_combo.setCurrentText(str(default_num_questions))
+        form_container.addLayout(create_form_row("Number of Questions", self.num_questions_combo))
+        
+        # Maximum marks dropdown (1-100)
+        self.max_marks_combo = QComboBox()
+        self.max_marks_combo.addItems([str(i) for i in range(1, 101)])
+        self.max_marks_combo.setCurrentText(str(default_max_marks))
+        form_container.addLayout(create_form_row("Maximum Marks", self.max_marks_combo))
+        
+        layout.addLayout(form_container)
+        layout.addStretch()
+        
+        # Dialog buttons with larger font
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            Qt.Horizontal, self
+        )
+        buttons.setFont(font)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+    
+    def _on_tenant_changed(self, tenant):
+        """Update zone options when tenant changes"""
+        current_zone = self.zone_combo.currentText()
+        self._update_zone_options(tenant)
+        # Try to keep the same zone if it exists in the new list
+        if current_zone in [self.zone_combo.itemText(i) for i in range(self.zone_combo.count())]:
+            self.zone_combo.setCurrentText(current_zone)
+        # Update roll number prefix when tenant/zone changes
+        self._update_roll_number_prefix()
+    
+    def _update_zone_options(self, tenant):
+        """Update zone combo box based on tenant"""
+        self.zone_combo.clear()
+        zones = self.zone_mapping.get(tenant, [])
+        self.zone_combo.addItems(zones)
+    
+    def _update_roll_number_prefix(self):
+        """Calculate and update the expected roll number prefix"""
+        zone = self.zone_combo.currentText()
+        year = self.year_combo.currentText()
+        class_num = self.class_combo.currentText()
+        
+        if zone and year and class_num:
+            # Format: <zone><year two digit><class two digit>
+            # Year is 4 digits (e.g., "2025"), take last 2 digits for prefix
+            year_two_digit = year[-2:] if len(year) == 4 else year
+            # Class is already zero-padded (e.g., "01", "02")
+            prefix = f"{zone}{year_two_digit}{class_num}"
+            self.roll_prefix_label.setText(prefix)
+        else:
+            self.roll_prefix_label.setText("--")
+    
+    def get_parameters(self):
+        """Get the selected parameters"""
+        # Convert class number back to int (it's stored as "01", "02", etc. in dropdown)
+        class_text = self.class_combo.currentText()
+        class_number = int(class_text)  # Will correctly parse "01" as 1, "02" as 2, etc.
+        
+        # Calculate expected roll number prefix
+        zone = self.zone_combo.currentText()
+        year = self.year_combo.currentText()
+        year_two_digit = year[-2:]
+        class_two_digit = class_text  # Already zero-padded
+        expected_roll_number_prefix = f"{zone}{year_two_digit}{class_two_digit}"
+        
+        return {
+            'tenant': self.tenant_combo.currentText(),
+            'zone': self.zone_combo.currentText(),
+            'class_number': class_number,
+            'year': int(self.year_combo.currentText()),
+            'num_questions': int(self.num_questions_combo.currentText()),
+            'max_marks': int(self.max_marks_combo.currentText()),
+            'expected_roll_number_prefix': expected_roll_number_prefix
+        }
 
 
 class PipelineProcessingWorker(QThread):
@@ -176,11 +449,12 @@ class PipelineProcessingWorker(QThread):
     file_processed = pyqtSignal(dict)  # individual file result
     status_message = pyqtSignal(str)  # detailed status messages for logging
     
-    def __init__(self, source_folder, output_folder, expected_markers):
+    def __init__(self, source_folder, output_folder, expected_markers, pipeline_parameters=None):
         super().__init__()
         self.source_folder = source_folder
         self.output_folder = output_folder
         self.expected_markers = expected_markers
+        self.pipeline_parameters = pipeline_parameters or {}
         self.is_cancelled = False
         self.processor = ImageProcessor() if ALL_DEPENDENCIES_AVAILABLE else None
         
@@ -267,7 +541,9 @@ class PipelineProcessingWorker(QThread):
                 
                 # Process image through the comprehensive pipeline
                 self.status_message.emit(f"🔧 Running pipeline for {filename}...")
-                result = self.processor.process_image_pipeline(image_path, self.source_folder)
+                result = self.processor.process_image_pipeline(
+                    image_path, self.source_folder, self.pipeline_parameters
+                )
                 
                 # Log pipeline results
                 if result['success']:
@@ -338,6 +614,15 @@ class ResultsPanel(QWidget):
         self.current_scan_index = 0
         self.scan_images_list = []
         self.is_scanning = False
+        # Store pipeline parameters (persist across processing sessions)
+        self.pipeline_parameters = {
+            'tenant': 'c2023-jgm',
+            'zone': 'JAMB',
+            'class_number': 1,
+            'year': 2025,
+            'num_questions': 50,
+            'max_marks': 100
+        }
         self.init_ui()
         
     def init_ui(self):
@@ -947,6 +1232,14 @@ class ResultsPanel(QWidget):
                               "Please select a folder with images first.")
             return
         
+        # Show parameter dialog
+        dialog = PipelineParametersDialog(self, self.pipeline_parameters)
+        if dialog.exec_() != QDialog.Accepted:
+            return  # User cancelled
+        
+        # Get and store parameters
+        self.pipeline_parameters = dialog.get_parameters()
+        
         # Get expected marker IDs from checkboxes
         expected_markers = []
         for i, checkbox in enumerate(self.marker_checkboxes, start=1):
@@ -967,19 +1260,47 @@ class ResultsPanel(QWidget):
         self.aruco_status_label.setText("Starting pipeline processing...")
         self.aruco_results_text.clear()
         
+        # Create and show processing log dialog
+        self.processing_log_dialog = ProcessingLogDialog(self)
+        self.processing_log_dialog.show()
+        
         # Start pipeline processing thread - use current_folder as output folder
         self.pipeline_worker = PipelineProcessingWorker(
-            self.current_folder, self.current_folder, expected_markers
+            self.current_folder, self.current_folder, expected_markers, self.pipeline_parameters
         )
         self.pipeline_worker.progress_updated.connect(self.update_aruco_progress)
         self.pipeline_worker.file_processed.connect(self.on_pipeline_file_processed)
         self.pipeline_worker.processing_finished.connect(self.on_pipeline_processing_finished)
+        # Connect status messages to both the popup dialog and the main log
         self.pipeline_worker.status_message.connect(self.add_to_processing_log)
+        self.pipeline_worker.status_message.connect(self.processing_log_dialog.add_log)
+        # Connect progress to popup dialog
+        self.pipeline_worker.progress_updated.connect(
+            lambda progress, text: self.processing_log_dialog.update_progress(progress, text)
+        )
         self.pipeline_worker.start()
         
-        # Clear the processing log and add initial message
+        # Add initial messages to popup dialog
+        self.processing_log_dialog.set_status("🔄 Processing...", "#2196F3")
+        self.processing_log_dialog.add_log("🚀 Pipeline processing started...")
+        self.processing_log_dialog.add_log(f"📋 Parameters:")
+        self.processing_log_dialog.add_log(f"   Year: {self.pipeline_parameters['year']}")
+        self.processing_log_dialog.add_log(f"   Tenant: {self.pipeline_parameters['tenant']}")
+        self.processing_log_dialog.add_log(f"   Zone: {self.pipeline_parameters['zone']}")
+        self.processing_log_dialog.add_log(f"   Class: {self.pipeline_parameters['class_number']}")
+        self.processing_log_dialog.add_log(f"   Questions: {self.pipeline_parameters['num_questions']}")
+        self.processing_log_dialog.add_log(f"   Max Marks: {self.pipeline_parameters['max_marks']}")
+        self.processing_log_dialog.add_log("="*80)
+        
+        # Also add to main processing log
         self.processing_log.clear()
         self.add_to_processing_log("🚀 Pipeline processing started...")
+        self.add_to_processing_log(f"📋 Parameters: Year={self.pipeline_parameters['year']}, "
+                                   f"Tenant={self.pipeline_parameters['tenant']}, "
+                                   f"Zone={self.pipeline_parameters['zone']}, "
+                                   f"Class={self.pipeline_parameters['class_number']}, "
+                                   f"Questions={self.pipeline_parameters['num_questions']}, "
+                                   f"Max Marks={self.pipeline_parameters['max_marks']}")
     
     def clear_processing_log(self):
         """Clear the processing log"""
@@ -1167,9 +1488,9 @@ class ResultsPanel(QWidget):
         # Clear thumbnail viewers when folder changes
         self.clear_thumbnail_viewers()
         
+        # First, quickly scan for files without calculating sizes (to avoid UI freeze)
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
         image_files = []
-        total_size = 0
         formats = set()
         
         if recursive:
@@ -1179,7 +1500,6 @@ class ResultsPanel(QWidget):
                     ext = os.path.splitext(file.lower())[1]
                     if ext in image_extensions:
                         image_files.append(os.path.join(root, file))
-                        total_size += os.path.getsize(os.path.join(root, file))
                         formats.add(ext)
         else:
             # Scan only current directory (for default folder)
@@ -1190,16 +1510,15 @@ class ResultsPanel(QWidget):
                         ext = os.path.splitext(file.lower())[1]
                         if ext in image_extensions:
                             image_files.append(file_path)
-                            total_size += os.path.getsize(file_path)
                             formats.add(ext)
             except Exception as e:
                 print(f"Error scanning folder {folder_path}: {e}")
+        
+        # Update UI immediately with file count (before calculating sizes)
         num_images = len(image_files)
-        avg_size = int(total_size / num_images) if num_images > 0 else 0
         self.total_images_label.setText(str(num_images))
-        self.total_size_label.setText(f"{total_size // 1024} KB")
-        self.avg_size_label.setText(f"{avg_size // 1024} KB" if avg_size else "0 B")
         self.formats_label.setText(", ".join(sorted(formats)) if formats else "None")
+        
         # Format breakdown
         breakdown = {}
         for file in image_files:
@@ -1218,6 +1537,75 @@ class ResultsPanel(QWidget):
         self.current_scan_index = 0
         if self.scan_images_list:
             self.show_image_details(self.scan_images_list[0])
+        
+        # Calculate total size asynchronously to avoid blocking UI
+        # Use QTimer to batch process file sizes
+        from PyQt5.QtCore import QTimer
+        if not hasattr(self, '_size_calc_timer'):
+            self._size_calc_timer = QTimer()
+            self._size_calc_timer.timeout.connect(self._calculate_folder_size_batch)
+            self._size_calc_timer.setSingleShot(False)
+            self._size_calc_timer.setInterval(50)  # Process in batches every 50ms
+        
+        # Reset and start size calculation
+        self._pending_size_files = image_files.copy()
+        self._calculated_total_size = 0
+        self._calculated_count = 0
+        if self._pending_size_files:
+            self._size_calc_timer.start()
+        else:
+            # No files, set size to 0 immediately
+            self.total_size_label.setText("0 KB")
+            self.avg_size_label.setText("0 B")
+    
+    def _calculate_folder_size_batch(self):
+        """Calculate file sizes in batches to avoid blocking UI"""
+        if not hasattr(self, '_pending_size_files') or not self._pending_size_files:
+            self._size_calc_timer.stop()
+            return
+        
+        # Process up to 10 files per batch
+        batch_size = 10
+        processed = 0
+        
+        while self._pending_size_files and processed < batch_size:
+            file_path = self._pending_size_files.pop(0)
+            try:
+                if os.path.exists(file_path):
+                    size = os.path.getsize(file_path)
+                    self._calculated_total_size += size
+                    self._calculated_count += 1
+            except Exception as e:
+                # Skip files that can't be read
+                pass
+            processed += 1
+        
+        # Update UI with current progress
+        if self._calculated_count > 0:
+            total_size_kb = self._calculated_total_size // 1024
+            avg_size = int(self._calculated_total_size / self._calculated_count)
+            avg_size_kb = avg_size // 1024
+            
+            self.total_size_label.setText(f"{total_size_kb} KB")
+            if avg_size_kb > 0:
+                self.avg_size_label.setText(f"{avg_size_kb} KB")
+            else:
+                self.avg_size_label.setText(f"{avg_size} B")
+        
+        # Stop if all files processed
+        if not self._pending_size_files:
+            self._size_calc_timer.stop()
+            # Final update
+            if self._calculated_count > 0:
+                total_size_kb = self._calculated_total_size // 1024
+                avg_size = int(self._calculated_total_size / self._calculated_count)
+                avg_size_kb = avg_size // 1024
+                
+                self.total_size_label.setText(f"{total_size_kb} KB")
+                if avg_size_kb > 0:
+                    self.avg_size_label.setText(f"{avg_size_kb} KB")
+                else:
+                    self.avg_size_label.setText(f"{avg_size} B")
     
     def show_image_details(self, image_path):
         """Display the selected image and its properties in the details tab."""
@@ -1306,32 +1694,76 @@ class ResultsPanel(QWidget):
     
     def on_pipeline_processing_finished(self, results):
         """Handle completion of pipeline batch processing."""
-        processed_files = results.get('processed_files', [])
+        # Check for errors first
+        error_message = results.get('message', '')
+        is_error = error_message and ('error' in error_message.lower() or 'failed' in error_message.lower() or results.get('total', 0) == 0)
         
-        # Count successes and failures
-        success_count = sum(1 for result in processed_files if result.get('success', False))
-        failure_count = len(processed_files) - success_count
+        # Update processing log dialog
+        if hasattr(self, 'processing_log_dialog') and self.processing_log_dialog:
+            if is_error:
+                # Show error
+                self.processing_log_dialog.processing_error(error_message)
+            else:
+                # Show success with results
+                processed_files = results.get('processed_files', [])
+                success_count = sum(1 for result in processed_files if result.get('success', False))
+                failure_count = len(processed_files) - success_count
+                total_files = len(processed_files)
+                total_time_all = sum(result.get('total_time_seconds', 0) or 0 for result in processed_files)
+                stage_time_totals: Dict[str, float] = {}
+                for result in processed_files:
+                    for stage_name, elapsed in result.get('stage_times', {}).items():
+                        stage_time_totals[stage_name] = stage_time_totals.get(stage_name, 0) + (elapsed or 0)
+                
+                self.processing_log_dialog.add_log("\n" + "="*80)
+                self.processing_log_dialog.add_log("📊 FINAL RESULTS:")
+                self.processing_log_dialog.add_log(f"   ✅ Successful: {success_count}")
+                self.processing_log_dialog.add_log(f"   ❌ Failed: {failure_count}")
+                self.processing_log_dialog.add_log(f"   📊 Total: {total_files}")
+                if total_files > 0:
+                    success_rate = (success_count / total_files) * 100
+                    self.processing_log_dialog.add_log(f"   📈 Success Rate: {success_rate:.1f}%")
+                    avg_time = total_time_all / total_files
+                    self.processing_log_dialog.add_log(f"   ⏱️ Avg per file: {avg_time:.2f}s")
+                self.processing_log_dialog.add_log(f"   ⏱️ Total time (all files): {total_time_all:.2f}s")
+                if stage_time_totals:
+                    self.processing_log_dialog.add_log("   ⏱️ Time by stage (sum over files):")
+                    for stage_name, elapsed in sorted(stage_time_totals.items(), key=lambda x: x[1], reverse=True):
+                        self.processing_log_dialog.add_log(f"      • {stage_name}: {elapsed:.2f}s")
+                self.processing_log_dialog.add_log("="*80)
+                self.processing_log_dialog.processing_complete()
         
         # Update UI
         self.aruco_progress_bar.setVisible(False)
         self.process_pipeline_button.setEnabled(True)
         self.process_aruco_button.setEnabled(True)
-        self.aruco_status_label.setText(results.get('message', 'Pipeline processing complete.'))
-        self.aruco_results_text.append(f"\n🎉 Pipeline processing complete: {success_count} success, {failure_count} failure")
+        
+        if is_error:
+            self.aruco_status_label.setText(f"Error: {error_message}")
+        else:
+            processed_files = results.get('processed_files', [])
+            success_count = sum(1 for result in processed_files if result.get('success', False))
+            failure_count = len(processed_files) - success_count
+            total_time_all = sum(result.get('total_time_seconds', 0) or 0 for result in processed_files)
+            stage_time_totals: Dict[str, float] = {}
+            for result in processed_files:
+                for stage_name, elapsed in result.get('stage_times', {}).items():
+                    stage_time_totals[stage_name] = stage_time_totals.get(stage_name, 0) + (elapsed or 0)
+
+            self.aruco_status_label.setText(results.get('message', 'Pipeline processing complete.'))
+            self.aruco_results_text.append(f"\n🎉 Pipeline processing complete: {success_count} success, {failure_count} failure")
+            self.add_to_processing_log(f"⏱️ Total pipeline time (all files): {total_time_all:.2f}s")
+            if processed_files:
+                avg_time = total_time_all / len(processed_files)
+                self.add_to_processing_log(f"⏱️ Avg per file: {avg_time:.2f}s")
+            if stage_time_totals:
+                stage_summary = ", ".join([f"{k}: {v:.2f}s" for k, v in sorted(stage_time_totals.items(), key=lambda x: x[1], reverse=True)])
+                self.add_to_processing_log(f"⏱️ Stage times (sum over files): {stage_summary}")
         
         # Refresh thumbnail viewers
         self.refresh_thumbnail_viewers()
         
-        # Show summary dialog
-        QMessageBox.information(
-            self, 
-            "Pipeline Processing Complete", 
-            f"Pipeline processing completed!\n\n"
-            f"✅ Successful: {success_count}\n"
-            f"❌ Failed: {failure_count}\n"
-            f"📊 Total: {len(processed_files)}\n\n"
-            f"Check the 'success' and 'error' folders for results."
-        )
+        # Note: Don't show another message box - the popup dialog already shows completion/error
 
     def create_uploaded_results_tab(self, results_data):
         """Create the uploaded results tab with table display."""
