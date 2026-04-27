@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QFormLayout, QTableWidget, QTableWidgetItem,
     QDialog, QDialogButtonBox, QComboBox
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QThread, pyqtSignal, QEventLoop
 from typing import Dict
 from PyQt5.QtGui import QPixmap, QFont
 from PIL import Image
@@ -442,19 +442,182 @@ class PipelineParametersDialog(QDialog):
         }
 
 
+class RollNumberInputDialog(QDialog):
+    """Dialog for manually entering roll number when extraction fails.
+    
+    The image fills the available window space, is scrollable, and the dialog
+    is fully resizable so the user can enlarge it to read the roll number.
+    """
+    
+    def __init__(self, image_path, expected_prefix, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Enter Roll Number")
+        self.setMinimumWidth(900)
+        self.setMinimumHeight(700)
+        self.roll_number = None
+        self._expected_prefix = expected_prefix  # Store for preview and validation
+        self._original_pixmap = None  # Store the original full-resolution pixmap
+        
+        # Make dialog resizable and start maximized-ish
+        self.setSizeGripEnabled(True)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Title
+        title_label = QLabel("❌ Roll number could not be extracted automatically")
+        title_label.setFont(QFont("Arial", 12, QFont.Bold))
+        title_label.setStyleSheet("color: #d32f2f; padding: 5px;")
+        layout.addWidget(title_label)
+        
+        # Expected prefix info
+        prefix_label = QLabel(f"Expected prefix: <b>{expected_prefix}</b>")
+        prefix_label.setFont(QFont("Arial", 10))
+        layout.addWidget(prefix_label)
+        
+        # Instruction
+        instruction_label = QLabel("Please look at the image below and enter the roll number suffix (the number part after the prefix).\n"
+                                   "You can resize this window or scroll to see the full image.")
+        instruction_label.setFont(QFont("Arial", 10))
+        instruction_label.setWordWrap(True)
+        layout.addWidget(instruction_label)
+        
+        # Image display in scroll area — fills the window
+        self._image_label = QLabel()
+        self._image_label.setAlignment(Qt.AlignCenter)
+        self._image_label.setStyleSheet("background-color: #f5f5f5;")
+        
+        try:
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                self._original_pixmap = pixmap
+                # Don't scale yet — will be scaled in resizeEvent / _fit_image_to_scroll_area
+                self._image_label.setPixmap(pixmap)
+            else:
+                self._image_label.setText("Could not load image")
+        except Exception as e:
+            self._image_label.setText(f"Error loading image: {str(e)}")
+        
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidget(self._image_label)
+        self._scroll_area.setWidgetResizable(False)  # We manage sizing ourselves
+        self._scroll_area.setStyleSheet("QScrollArea { border: 2px solid #ccc; }")
+        # The scroll area should take all available vertical space
+        layout.addWidget(self._scroll_area, stretch=1)
+        
+        # Input field layout
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel("Roll Number Suffix:"))
+        
+        from PyQt5.QtWidgets import QLineEdit
+        self.input_field = QLineEdit()
+        self.input_field.setPlaceholderText("e.g., 0105 (for complete roll number: " + expected_prefix + "-0105)")
+        self.input_field.setFont(QFont("Arial", 12))
+        input_layout.addWidget(self.input_field)
+        layout.addLayout(input_layout)
+        
+        # Full roll number preview
+        self.preview_label = QLabel()
+        self.preview_label.setFont(QFont("Arial", 11, QFont.Bold))
+        self.preview_label.setStyleSheet("color: #1976d2; padding: 5px;")
+        self.input_field.textChanged.connect(self._update_preview)
+        layout.addWidget(self.preview_label)
+        
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            Qt.Horizontal, self
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.input_field.setFocus()
+        
+        # Try to size the dialog to 85% of the screen
+        try:
+            from PyQt5.QtWidgets import QApplication
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geom = screen.availableGeometry()
+                self.resize(int(screen_geom.width() * 0.85), int(screen_geom.height() * 0.85))
+        except Exception:
+            self.resize(1200, 900)
+    
+    def showEvent(self, event):
+        """When the dialog is shown, fit the image to the scroll area width."""
+        super().showEvent(event)
+        # Use a single-shot timer so the layout has finished computing sizes
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(50, self._fit_image_to_scroll_area)
+    
+    def resizeEvent(self, event):
+        """Re-fit the image whenever the dialog is resized."""
+        super().resizeEvent(event)
+        self._fit_image_to_scroll_area()
+    
+    def _fit_image_to_scroll_area(self):
+        """Scale the image to fill the scroll area width, keeping aspect ratio.
+        
+        The image is scaled to match the full width of the scroll viewport so the
+        user can see as much detail as possible. If the resulting height exceeds
+        the viewport, the scroll area provides vertical scrolling automatically.
+        """
+        if self._original_pixmap is None or self._original_pixmap.isNull():
+            return
+        
+        viewport_width = self._scroll_area.viewport().width()
+        if viewport_width <= 0:
+            return
+        
+        scaled_pixmap = self._original_pixmap.scaledToWidth(
+            viewport_width, Qt.SmoothTransformation
+        )
+        self._image_label.setPixmap(scaled_pixmap)
+        self._image_label.adjustSize()
+    
+    def _update_preview(self, text):
+        """Update the preview label with the full roll number"""
+        expected_prefix = getattr(self, '_expected_prefix', '')
+        if text.strip():
+            full_roll = f"{expected_prefix}-{text.strip()}"
+            self.preview_label.setText(f"Full roll number: {full_roll}")
+        else:
+            self.preview_label.setText("")
+    
+    def _accept(self):
+        """Validate and accept input"""
+        suffix = self.input_field.text().strip()
+        if not suffix:
+            QMessageBox.warning(self, "Invalid Input", "Please enter a roll number suffix.")
+            return
+        
+        # Get expected prefix from parent or use stored value
+        expected_prefix = getattr(self, '_expected_prefix', '')
+        self.roll_number = f"{expected_prefix}-{suffix}"
+        self.accept()
+    
+    def get_roll_number(self):
+        """Get the entered roll number"""
+        return self.roll_number
+
+
 class PipelineProcessingWorker(QThread):
     """Worker thread for comprehensive pipeline processing of images"""
     progress_updated = pyqtSignal(int, str)  # progress, current_file
     processing_finished = pyqtSignal(dict)  # results dictionary
     file_processed = pyqtSignal(dict)  # individual file result
     status_message = pyqtSignal(str)  # detailed status messages for logging
+    request_roll_number_input = pyqtSignal(str, str, object)  # image_path, expected_prefix, callback
     
-    def __init__(self, source_folder, output_folder, expected_markers, pipeline_parameters=None):
+    def __init__(self, source_folder, output_folder, expected_markers, pipeline_parameters=None, parent_widget=None):
         super().__init__()
         self.source_folder = source_folder
         self.output_folder = output_folder
         self.expected_markers = expected_markers
         self.pipeline_parameters = pipeline_parameters or {}
+        self.parent_widget = parent_widget
         self.is_cancelled = False
         self.processor = ImageProcessor() if ALL_DEPENDENCIES_AVAILABLE else None
         
@@ -527,6 +690,38 @@ class PipelineProcessingWorker(QThread):
             
             self.status_message.emit("🚀 Starting pipeline processing...")
             
+            # Create helper function for roll number input dialog
+            # This will be passed in context and called from the stage
+            roll_number_callback_dict = {'roll_number': None, 'success': False}
+            
+            def request_roll_number_input_helper(image_path, expected_prefix):
+                """Helper function to request roll number input from main thread"""
+                roll_number_callback_dict['roll_number'] = None
+                roll_number_callback_dict['success'] = False
+                
+                # Emit signal to request input (handled on main thread)
+                self.request_roll_number_input.emit(image_path, expected_prefix, roll_number_callback_dict)
+                
+                # Wait for response using event loop
+                loop = QEventLoop()
+                # Wait up to 5 minutes for user input
+                QTimer.singleShot(300000, loop.quit)  # 5 minute timeout
+                # Also check periodically if result is ready
+                def check_result():
+                    if roll_number_callback_dict['roll_number'] is not None or roll_number_callback_dict.get('cancelled', False):
+                        loop.quit()
+                    else:
+                        QTimer.singleShot(100, check_result)
+                check_result()
+                loop.exec_()
+                
+                return roll_number_callback_dict.get('roll_number') if roll_number_callback_dict.get('success') else None
+            
+            # Add helper function to pipeline parameters
+            pipeline_params_with_helper = self.pipeline_parameters.copy()
+            pipeline_params_with_helper['_roll_number_input_helper'] = request_roll_number_input_helper
+            pipeline_params_with_helper['_parent_widget'] = self.parent_widget
+            
             # Process each image through the pipeline
             for i, image_path in enumerate(image_files):
                 if self.is_cancelled:
@@ -542,7 +737,7 @@ class PipelineProcessingWorker(QThread):
                 # Process image through the comprehensive pipeline
                 self.status_message.emit(f"🔧 Running pipeline for {filename}...")
                 result = self.processor.process_image_pipeline(
-                    image_path, self.source_folder, self.pipeline_parameters
+                    image_path, self.source_folder, pipeline_params_with_helper
                 )
                 
                 # Log pipeline results
@@ -1271,7 +1466,7 @@ class ResultsPanel(QWidget):
         
         # Start pipeline processing thread - use current_folder as output folder
         self.pipeline_worker = PipelineProcessingWorker(
-            self.current_folder, self.current_folder, expected_markers, self.pipeline_parameters
+            self.current_folder, self.current_folder, expected_markers, self.pipeline_parameters, parent_widget=self
         )
         self.pipeline_worker.progress_updated.connect(self.update_aruco_progress)
         self.pipeline_worker.file_processed.connect(self.on_pipeline_file_processed)
@@ -1283,6 +1478,8 @@ class ResultsPanel(QWidget):
         self.pipeline_worker.progress_updated.connect(
             lambda progress, text: self.processing_log_dialog.update_progress(progress, text)
         )
+        # Connect roll number input request signal
+        self.pipeline_worker.request_roll_number_input.connect(self.handle_roll_number_input_request)
         self.pipeline_worker.start()
         
         # Add initial messages to popup dialog
@@ -1696,6 +1893,23 @@ class ResultsPanel(QWidget):
                 self.aruco_results_text.append(f"📤 {filename}: Uploaded to API - {upload_id}")
         else:
             self.aruco_results_text.append(f"❌ {filename}: Failed at {error_stage}")
+    
+    def handle_roll_number_input_request(self, image_path, expected_prefix, callback_obj):
+        """Handle roll number input request from pipeline stage"""
+        dialog = RollNumberInputDialog(image_path, expected_prefix, self)
+        result = dialog.exec_()
+        if result == QDialog.Accepted:
+            roll_number = dialog.get_roll_number()
+            if roll_number:
+                # Set the result in the callback dictionary
+                callback_obj['roll_number'] = roll_number
+                callback_obj['success'] = True
+            else:
+                callback_obj['success'] = False
+                callback_obj['cancelled'] = True
+        else:
+            callback_obj['success'] = False
+            callback_obj['cancelled'] = True
     
     def on_pipeline_processing_finished(self, results):
         """Handle completion of pipeline batch processing."""

@@ -103,7 +103,7 @@ class RollNumberExtractionStage(PipelineStage):
                 print(f"[{class_name}] Extracted string: '{extracted_text}'")
                 
                 # Validate and enforce expected prefix if provided
-                roll_number = self._validate_and_enforce_prefix(roll_number, context, class_name)
+                roll_number, roll_number_prefix, roll_number_suffix = self._validate_and_enforce_prefix(roll_number, context, class_name)
                 
                 # Mark roll number rectangle on visualization image
                 if roll_rect:
@@ -120,19 +120,80 @@ class RollNumberExtractionStage(PipelineStage):
                 print(f"[{class_name}] Visualization image saved")
                 
                 print(f"[{class_name}] Returning success result")
+                print(f"[{class_name}] Storing in context - roll_number_prefix: '{roll_number_prefix}', roll_number_suffix: '{roll_number_suffix}'")
                 return self.create_stage_result(
                     success=True,
                     roll_number=roll_number,
+                    roll_number_prefix=roll_number_prefix,
+                    roll_number_suffix=roll_number_suffix,
                     extracted_text=extracted_text,
                     roll_number_rect=roll_rect,
                     visualization_image_path=viz_image_path
                 )
             else:
                 print(f"[{class_name}] ❌ FAILURE: No valid roll number found")
+                print(f"[{class_name}] Attempting manual input via dialog...")
+                
+                # Try to get roll number from user via dialog
+                roll_number_input_helper = context.get('_roll_number_input_helper')
+                expected_prefix = context.get('expected_roll_number_prefix', '')
+                
+                if roll_number_input_helper and callable(roll_number_input_helper):
+                    print(f"[{class_name}] Dialog helper available, requesting user input...")
+                    print(f"[{class_name}] Expected prefix: '{expected_prefix}'")
+                    
+                    # Use rotated image path if available, otherwise original
+                    image_to_show = context.get('rotated_image_path', image_path)
+                    
+                    try:
+                        user_roll_number = roll_number_input_helper(image_to_show, expected_prefix)
+                        if user_roll_number:
+                            print(f"[{class_name}] ✅ SUCCESS: User provided roll number: {user_roll_number}")
+                            
+                            # Validate and enforce prefix (should already match, but just in case)
+                            roll_number, roll_number_prefix, roll_number_suffix = self._validate_and_enforce_prefix(user_roll_number, context, class_name)
+                            
+                            # Mark roll number rectangle on visualization image (use estimated position)
+                            if viz_image is not None:
+                                print(f"[{class_name}] Marking roll number region on visualization image")
+                                # Use a default region near the top-left if we can't determine exact position
+                                h, w = viz_image.shape[:2]
+                                x_min, y_min = int(w * 0.1), int(h * 0.1)
+                                x_max, y_max = int(w * 0.5), int(h * 0.2)
+                                cv2.rectangle(viz_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 3)  # Green rectangle
+                                cv2.putText(viz_image, f"Roll Number: {roll_number}", (x_min, y_min - 10), 
+                                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                                print(f"[{class_name}] Roll number region marked at: ({x_min}, {y_min}) to ({x_max}, {y_max})")
+                                
+                                # Save visualization image
+                                print(f"[{class_name}] Saving visualization image to: {viz_image_path}")
+                                cv2.imwrite(viz_image_path, viz_image)
+                                print(f"[{class_name}] Visualization image saved")
+                            
+                            print(f"[{class_name}] Returning success result with user-provided roll number")
+                            print(f"[{class_name}] Storing in context - roll_number_prefix: '{roll_number_prefix}', roll_number_suffix: '{roll_number_suffix}'")
+                            return self.create_stage_result(
+                                success=True,
+                                roll_number=roll_number,
+                                roll_number_prefix=roll_number_prefix,
+                                roll_number_suffix=roll_number_suffix,
+                                extracted_text=f"Manually entered: {roll_number}",
+                                roll_number_rect=None,  # No exact rectangle for manual entry
+                                visualization_image_path=viz_image_path
+                            )
+                        else:
+                            print(f"[{class_name}] ❌ User cancelled roll number input")
+                    except Exception as e:
+                        print(f"[{class_name}] ⚠️ Exception while showing dialog: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"[{class_name}] ⚠️ Dialog helper not available in context")
+                
                 print(f"[{class_name}] Returning failure result")
                 return self.create_stage_result(
                     success=False,
-                    error="No valid roll number found using ArUco marker regions",
+                    error="No valid roll number found using ArUco marker regions and user did not provide input",
                     roll_number=None,
                     extracted_text=extracted_text if extracted_text else ""
                 )
@@ -293,6 +354,36 @@ class RollNumberExtractionStage(PipelineStage):
         
         return roll_number, text.strip(), rect_coords
     
+    def _find_split_dash(self, roll_number: str) -> tuple:
+        """
+        Find the dash that should be used for splitting (the one followed by exactly 4 digits).
+        If multiple dashes exist, find the last one that is followed by exactly 4 digits.
+        
+        Args:
+            roll_number: Roll number string that may contain dashes
+            
+        Returns:
+            Tuple of (before_dash, after_dash) if valid split found, or (None, None) otherwise
+        """
+        if '-' not in roll_number:
+            return None, None
+        
+        # Find all dash positions
+        dash_positions = [i for i, char in enumerate(roll_number) if char == '-']
+        
+        # Check each dash from right to left (prefer the last valid one)
+        for dash_pos in reversed(dash_positions):
+            after_dash = roll_number[dash_pos + 1:]
+            # Check if exactly 4 digits follow this dash (and nothing more, or next char is not a digit)
+            if len(after_dash) >= 4 and after_dash[:4].isdigit():
+                # Make sure it's exactly 4 digits (not more digits after)
+                if len(after_dash) == 4 or (len(after_dash) > 4 and not after_dash[4].isdigit()):
+                    before_dash = roll_number[:dash_pos]
+                    return before_dash, after_dash[:4]
+        
+        # If no valid dash found, return None
+        return None, None
+    
     def _parse_roll_number(self, text: str) -> Optional[str]:
         """
         Parse roll number from OCR text using regex patterns.
@@ -323,11 +414,21 @@ class RollNumberExtractionStage(PipelineStage):
         cleaned_text = re.sub(r'^[^A-Za-z0-9]+', '', cleaned_text)  # Remove leading non-alphanumeric
         cleaned_text = re.sub(r'[^A-Za-z0-9]+$', '', cleaned_text)  # Remove trailing non-alphanumeric
         
+        # Remove trailing isolated single letters (common OCR artifacts like " r", " n", " l")
+        # e.g., "SURI-2510-0013 r" -> "SURI-2510-0013"
+        cleaned_before_single = cleaned_text
+        cleaned_text = re.sub(r'\s+[A-Za-z]$', '', cleaned_text)
+        if cleaned_text != cleaned_before_single:
+            print(f"[{class_name}] Removed trailing single letter: '{cleaned_before_single}' → '{cleaned_text}'")
+        
         print(f"[{class_name}] Cleaned text: '{cleaned_text}'")
         
         # Patterns for roll numbers (ordered by specificity)
         # Note: Patterns allow dashes, underscores, and slashes within roll numbers
         patterns = [
+            # Highest priority: Multi-dash format PREFIX-MIDDLE-SUFFIX (e.g., SURI-2510-0013, SURI-I2508-0007)
+            r'\b([A-Z]{2,6}[A-Z0-9]*-[A-Z0-9]{3,6}-\d{4})\b',  # Letters + alphanumeric + dash + middle + dash + 4 digits
+            
             # Priority pattern: Letters + digits + dash + exactly 4 digits (e.g., NAYA2508-0075)
             r'\b([A-Z]{2,6}[A-Z0-9]*-\d{4})\b',  # Letters + optional alphanumeric + dash + exactly 4 digits
             
@@ -386,18 +487,16 @@ class RollNumberExtractionStage(PipelineStage):
                     
                     # If roll number contains a dash, validate that exactly 4 digits follow it
                     if '-' in roll_number:
-                        parts = roll_number.split('-', 1)  # Split only on first dash
-                        if len(parts) == 2:
-                            before_dash = parts[0]
-                            after_dash = parts[1]
+                        before_dash, after_dash = self._find_split_dash(roll_number)
+                        if before_dash is None or after_dash is None:
+                            print(f"[{class_name}]   ⚠️ REJECTED: No dash found that is followed by exactly 4 digits")
+                            print(f"[{class_name}]   → Trying next pattern...")
+                            continue  # Skip this match, try next pattern
+                        else:
                             print(f"[{class_name}]   → Contains dash: '{before_dash}' - '{after_dash}'")
-                            if not (after_dash.isdigit() and len(after_dash) == 4):
-                                print(f"[{class_name}]   ⚠️ REJECTED: Dash must be followed by exactly 4 digits")
-                                print(f"[{class_name}]   → Found: '{after_dash}' (length: {len(after_dash)}, isdigit: {after_dash.isdigit()})")
-                                print(f"[{class_name}]   → Trying next pattern...")
-                                continue  # Skip this match, try next pattern
-                            else:
-                                print(f"[{class_name}]   ✅ VALID: Dash followed by exactly 4 digits")
+                            print(f"[{class_name}]   ✅ VALID: Dash followed by exactly 4 digits")
+                            # Reconstruct roll number with correct split
+                            roll_number = f"{before_dash}-{after_dash}"
                     else:
                         if has_dash_in_text:
                             print(f"[{class_name}]   ⚠️ REJECTED: Text has dash but roll number doesn't")
@@ -451,18 +550,16 @@ class RollNumberExtractionStage(PipelineStage):
                     
                     # If roll number contains a dash, validate that exactly 4 digits follow it
                     if '-' in roll_number:
-                        parts = roll_number.split('-', 1)  # Split only on first dash
-                        if len(parts) == 2:
-                            before_dash = parts[0]
-                            after_dash = parts[1]
+                        before_dash, after_dash = self._find_split_dash(roll_number)
+                        if before_dash is None or after_dash is None:
+                            print(f"[{class_name}]   ⚠️ REJECTED: No dash found that is followed by exactly 4 digits")
+                            print(f"[{class_name}]   → Trying next pattern...")
+                            continue  # Skip this match, try next pattern
+                        else:
                             print(f"[{class_name}]   → Contains dash: '{before_dash}' - '{after_dash}'")
-                            if not (after_dash.isdigit() and len(after_dash) == 4):
-                                print(f"[{class_name}]   ⚠️ REJECTED: Dash must be followed by exactly 4 digits")
-                                print(f"[{class_name}]   → Found: '{after_dash}' (length: {len(after_dash)}, isdigit: {after_dash.isdigit()})")
-                                print(f"[{class_name}]   → Trying next pattern...")
-                                continue  # Skip this match, try next pattern
-                            else:
-                                print(f"[{class_name}]   ✅ VALID: Dash followed by exactly 4 digits")
+                            print(f"[{class_name}]   ✅ VALID: Dash followed by exactly 4 digits")
+                            # Reconstruct roll number with correct split
+                            roll_number = f"{before_dash}-{after_dash}"
                     else:
                         if has_dash_in_original:
                             print(f"[{class_name}]   ⚠️ REJECTED: Text has dash but roll number doesn't")
@@ -497,14 +594,19 @@ class RollNumberExtractionStage(PipelineStage):
             class_name: Class name for logging
             
         Returns:
-            The roll number with enforced prefix if needed
+            Tuple of (roll_number, final_prefix, final_suffix) with enforced prefix if needed
         """
         # Get expected prefix from context
         expected_prefix = context.get('expected_roll_number_prefix')
         
         if not expected_prefix:
             print(f"[{class_name}] ⚠️ No expected_roll_number_prefix found in context, skipping prefix validation")
-            return roll_number
+            # Try to extract prefix and suffix from roll number anyway
+            if '-' in roll_number:
+                prefix_part, suffix = self._find_split_dash(roll_number)
+                if prefix_part is not None and suffix is not None:
+                    return roll_number, prefix_part, suffix
+            return roll_number, None, None
         
         print(f"[{class_name}] ====== Prefix Validation ======")
         print(f"[{class_name}] Expected prefix: '{expected_prefix}'")
@@ -512,15 +614,22 @@ class RollNumberExtractionStage(PipelineStage):
         
         # Determine the actual prefix from extracted roll number
         # Prefix format is: <zone><year two digit><class two digit>
-        # We need to extract the prefix part (everything before the dash if there's a dash, or a certain length)
+        # We need to extract the prefix part (everything before the LAST dash followed by 4 digits)
         actual_prefix = None
         
-        # If roll number contains a dash, prefix is everything before the dash
+        # If roll number contains a dash, use _find_split_dash to find the correct split point
+        # This handles roll numbers like SURI-I2508-0007 where prefix is SURI-I2508 and suffix is 0007
         if '-' in roll_number:
-            parts = roll_number.split('-', 1)
-            actual_prefix = parts[0]
-            suffix = parts[1] if len(parts) > 1 else ""
-            print(f"[{class_name}] Roll number contains dash: '{actual_prefix}' - '{suffix}'")
+            prefix_part, suffix = self._find_split_dash(roll_number)
+            if prefix_part is not None and suffix is not None:
+                actual_prefix = prefix_part
+                print(f"[{class_name}] Roll number contains dash: '{actual_prefix}' - '{suffix}'")
+            else:
+                # Fallback: split on first dash if no valid 4-digit suffix found
+                parts = roll_number.split('-', 1)
+                actual_prefix = parts[0]
+                suffix = parts[1] if len(parts) > 1 else ""
+                print(f"[{class_name}] Roll number contains dash (fallback split): '{actual_prefix}' - '{suffix}'")
         else:
             # No dash - prefix length should match expected prefix length
             expected_prefix_len = len(expected_prefix)
@@ -531,13 +640,14 @@ class RollNumberExtractionStage(PipelineStage):
                 print(f"[{class_name}] Remaining suffix: '{suffix}'")
             else:
                 print(f"[{class_name}] ⚠️ Roll number shorter than expected prefix, cannot validate")
-                return roll_number
+                return roll_number, None, None
         
         # Compare prefixes (case-insensitive)
         if actual_prefix.upper() == expected_prefix.upper():
             print(f"[{class_name}] ✅ Prefix matches expected prefix exactly")
+            print(f"[{class_name}] Final prefix: '{actual_prefix}', Final suffix: '{suffix}'")
             print(f"[{class_name}] ================================")
-            return roll_number
+            return roll_number, actual_prefix, suffix
         else:
             print(f"[{class_name}] ⚠️ Prefix mismatch detected!")
             print(f"[{class_name}]   Expected: '{expected_prefix}'")
@@ -554,5 +664,6 @@ class RollNumberExtractionStage(PipelineStage):
             
             print(f"[{class_name}]   Original:  '{roll_number}'")
             print(f"[{class_name}]   Enforced:  '{enforced_roll_number}'")
+            print(f"[{class_name}] Final prefix: '{expected_prefix}', Final suffix: '{suffix}'")
             print(f"[{class_name}] ================================")
-            return enforced_roll_number
+            return enforced_roll_number, expected_prefix, suffix

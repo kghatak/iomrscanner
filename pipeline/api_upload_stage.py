@@ -102,6 +102,52 @@ class APIUploadStage(PipelineStage):
         finally:
             print(f"[{class_name}] ====== API Upload Stage Complete ======\n")
     
+    def _parse_roll_number_parts(self, roll_number: str) -> tuple:
+        """
+        Parse roll number to extract roll prefix and number suffix.
+        If multiple dashes exist, finds the dash that is followed by exactly 4 digits.
+        
+        Args:
+            roll_number: Roll number string (e.g., "SURI-II2508-0003" or "JGMR2507-0105")
+            
+        Returns:
+            Tuple of (roll_prefix, number_suffix)
+        """
+        class_name = self.__class__.__name__
+        
+        if '-' not in roll_number:
+            # If no dash, try to split at a reasonable point (e.g., last 4 digits as number)
+            # This is a fallback - ideally roll numbers should have dashes
+            print(f"[{class_name}] ⚠️  WARNING: Roll number has no dash separator. Attempting to parse...")
+            if len(roll_number) >= 4:
+                roll = roll_number[:-4]
+                number = roll_number[-4:]
+            else:
+                roll = roll_number
+                number = ""
+                print(f"[{class_name}] ⚠️  WARNING: Could not parse roll number. Using full value as roll.")
+            return roll, number
+        
+        # Find all dash positions
+        dash_positions = [i for i, char in enumerate(roll_number) if char == '-']
+        
+        # Check each dash from right to left (prefer the last valid one)
+        # Look for dash followed by exactly 4 digits
+        for dash_pos in reversed(dash_positions):
+            after_dash = roll_number[dash_pos + 1:]
+            # Check if exactly 4 digits follow this dash
+            if len(after_dash) >= 4 and after_dash[:4].isdigit():
+                # Make sure it's exactly 4 digits (not more digits after)
+                if len(after_dash) == 4 or (len(after_dash) > 4 and not after_dash[4].isdigit()):
+                    roll = roll_number[:dash_pos]
+                    number = after_dash[:4]
+                    return roll, number
+        
+        # If no dash with 4 digits found, fall back to splitting on first dash
+        print(f"[{class_name}] ⚠️  WARNING: No dash followed by exactly 4 digits found. Splitting on first dash.")
+        roll, number = roll_number.split('-', 1)
+        return roll, number
+    
     def _upload_to_api(self, payload: Dict[str, Any], roll_number: str, tenant: str) -> Dict[str, Any]:
         """
         Upload answer validation result to API via PATCH request with retry logic.
@@ -122,19 +168,8 @@ class APIUploadStage(PipelineStage):
         
         # Parse roll number to extract roll and number parts
         # Format: "JGMR2507-0105" -> roll="JGMR2507", number="0105"
-        if '-' in roll_number:
-            roll, number = roll_number.split('-', 1)
-        else:
-            # If no dash, try to split at a reasonable point (e.g., last 4 digits as number)
-            # This is a fallback - ideally roll numbers should have dashes
-            print(f"[{class_name}] ⚠️  WARNING: Roll number has no dash separator. Attempting to parse...")
-            if len(roll_number) >= 4:
-                roll = roll_number[:-4]
-                number = roll_number[-4:]
-            else:
-                roll = roll_number
-                number = ""
-                print(f"[{class_name}] ⚠️  WARNING: Could not parse roll number. Using full value as roll.")
+        # Format: "SURI-II2508-0003" -> roll="SURI-II2508", number="0003" (split on last dash with 4 digits)
+        roll, number = self._parse_roll_number_parts(roll_number)
         
         print(f"[{class_name}] Parsed roll: {roll}, number: {number}")
         
