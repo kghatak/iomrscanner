@@ -113,7 +113,11 @@ class PipelineStage(ABC):
         
         # Log each context item with appropriate formatting
         for key, value in context.items():
-            if isinstance(value, str) and os.path.exists(value):
+            if key == "qr_result":
+                print(f"{log_prefix}   qr_result: status={value.status.value}")
+            elif key in {"qr_identity", "qr_studentID", "qr_exam_roll_number"}:
+                print(f"{log_prefix}   {key}: [validated identifier]")
+            elif isinstance(value, str) and os.path.exists(value):
                 # It's a file path - add descriptive labels
                 file_type = ""
                 if "visualization_circle" in key:

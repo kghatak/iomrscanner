@@ -211,6 +211,10 @@ class AnswerValidationStage(PipelineStage):
                 final_answer=final_answer,
                 marked_circles_highlighted=len(marked_circles)
             )
+
+            qr_result = context.get('qr_result')
+            if qr_result and qr_result.is_valid:
+                result['qr_identity'] = qr_result.data.as_dict()
             
             # Add answer validation result to context if available
             if answer_validation_result:

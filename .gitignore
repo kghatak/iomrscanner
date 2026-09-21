@@ -200,6 +200,7 @@ installer_temp/
 test_images/
 sample_images/
 temp/
+tests/test_omr_with_qr_code_report.txt
 
 # Azure deployment files (if using Azure)
 .azure/

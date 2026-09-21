@@ -57,6 +57,16 @@ def print_stage_result(stage_name: str, stage_result: dict):
         roll_number = stage_result.get('roll_number')
         if roll_number:
             print(f"     🆔 Roll Number: {roll_number}")
+
+    elif stage_name == 'qr_reading':
+        qr_result = stage_result.get('qr_result')
+        if qr_result:
+            print(f"     QR status: {qr_result.status.value}")
+            if qr_result.is_valid:
+                print(f"     StudentCode: {qr_result.data.student_code}")
+                print(f"     ExamCode: {qr_result.data.exam_code}")
+                print(f"     ExamRoll: {qr_result.data.exam_roll}")
+                print(f"     ExamRollNumber: {qr_result.data.exam_roll_number}")
     
     elif stage_name == 'fetch_student':
         student_data = stage_result.get('student_data', {})
@@ -240,6 +250,15 @@ Note: ArUco markers use DICT_4X4_50 format, valid IDs are 0-49.
     
     try:
         result = processor.process_image_pipeline(str(image_path), str(output_folder))
+
+        qr_result = result.get('qr_result')
+        if qr_result:
+            print(f"QR status: {qr_result.status.value}")
+            if qr_result.is_valid:
+                print(f"StudentCode: {qr_result.data.student_code}")
+                print(f"ExamCode: {qr_result.data.exam_code}")
+                print(f"ExamRoll: {qr_result.data.exam_roll}")
+                print(f"ExamRollNumber: {qr_result.data.exam_roll_number}")
         
         # Print results
         print_header("Pipeline Results", "-")

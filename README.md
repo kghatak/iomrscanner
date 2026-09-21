@@ -121,6 +121,19 @@ See [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) for platform-specific instruction
 3. **Scan All** - Use "Scan All Images" for automatic slideshow
 4. **Export Results** - Save analysis reports with "Upload Results"
 
+### Single-image command
+
+Run the existing command-line entry point to see QR status, validated identifiers,
+and OMR stage results together:
+
+```bash
+python test_single_image_pipeline.py path/to/omr-image.jpg
+```
+
+QR decoding uses OpenCV and reports `not_detected`, `detected_unreadable`,
+`invalid_json`, `invalid_payload`, `unsupported_version`, or `valid`. A QR failure
+does not stop OMR processing.
+
 ## 🎯 UI Layout
 
 - **Left Panel (20%, max 300px)** - Image thumbnails and list

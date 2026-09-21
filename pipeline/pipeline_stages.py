@@ -20,6 +20,7 @@ from .base_stage import PipelineStage
 # Import stage implementations
 from .aruco_check_stage import ArUcoCheckStage
 from .orientation_check_stage import OrientationCheckStage
+from .qr_reading_stage import QrReadingStage
 from .roll_number_extraction_stage import RollNumberExtractionStage
 from .fetch_student_stage import FetchStudentStage
 from .omr_processing_stage import OMRProcessingStage
@@ -27,6 +28,7 @@ from .omr_processing_second_stage import OMRProcessingSecondStage
 from .omr_answer_extraction_stage import OMRAnswerExtractionStage
 from .answer_validation_stage import AnswerValidationStage
 from .api_upload_stage import APIUploadStage
+from .omr_qr import OmrQrReader, OmrQrResult, QrStatus
 
 
 class PipelineManager:
@@ -60,6 +62,7 @@ class PipelineManager:
         self.stages = [
             ArUcoCheckStage(self.processor),
             OrientationCheckStage(self.processor),
+            QrReadingStage(self.processor),
             RollNumberExtractionStage(self.processor),
             FetchStudentStage(self.processor),  # Fetch student data after roll number extraction
             OMRProcessingStage(self.processor),  # Pass 1: Regular column detection
@@ -377,8 +380,26 @@ class PipelineManager:
         if initial_context:
             context.update(initial_context)
             print(f"[{class_name}] Initial context merged: {list(initial_context.keys())}")
-        
-        print(f"[{class_name}] Context initialized: {context}")
+
+        try:
+            original_image = cv2.imread(image_path)
+            initial_qr_result = OmrQrReader().read([("original", original_image)])
+        except Exception as error:
+            initial_qr_result = OmrQrResult(
+                status=QrStatus.DETECTED_UNREADABLE,
+                message=f"QR reading failed: {type(error).__name__}",
+            )
+        context["qr_result"] = initial_qr_result
+        pipeline_result["qr_result"] = initial_qr_result
+        if initial_qr_result.is_valid:
+            qr_identity = initial_qr_result.data.as_dict()
+            context["qr_identity"] = qr_identity
+            context["qr_studentID"] = initial_qr_result.data.student_code
+            context["qr_exam_roll_number"] = initial_qr_result.data.full_exam_roll_number
+            pipeline_result["identity"] = qr_identity
+        print(f"[{class_name}] Initial QR status: {initial_qr_result.status.value}")
+
+        print(f"[{class_name}] Context initialized - Keys: {list(context.keys())}")
         
         # Log initial context state
         if self.stages:
@@ -427,6 +448,12 @@ class PipelineManager:
                 print(f"[{class_name}] Stage elapsed time: {stage_result.get('elapsed_seconds', 0):.3f}s")
                 
                 pipeline_result["stages"][stage_name] = stage_result
+                if stage_name == "qr_reading":
+                    pipeline_result["qr_result"] = stage_result.get("qr_result")
+                    if stage_result.get("qr_identity"):
+                        pipeline_result["identity"] = stage_result["qr_identity"]
+                        pipeline_result["qr_studentID"] = stage_result["qr_studentID"]
+                        pipeline_result["qr_exam_roll_number"] = stage_result["qr_exam_roll_number"]
                 # Store timing
                 if "elapsed_seconds" in stage_result:
                     pipeline_result["stage_times"][stage_name] = stage_result["elapsed_seconds"]
