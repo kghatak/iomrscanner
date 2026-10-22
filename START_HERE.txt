@@ -6,45 +6,54 @@ TO RUN THIS APPLICATION:
 
 1. Double-click "run_app.bat"
    
-   That's it! The script will automatically:
-   - Check if Python is installed
-   - If not, offer to download Python automatically (NO INSTALLATION NEEDED!)
-   - Set up everything needed
-   - Install dependencies (first time only, takes 5-10 minutes)
-   - Launch the application
+   Share this batch file alone; Git and Python are not required beforehand.
+   On first run, the script will:
+   - Download a pinned version from the public GitHub repository
+   - Set up an isolated Python 3.12 environment for the current user
+   - Install Tesseract OCR, English language data, and Poppler
+   - Install the Python requirements and test OCR and PDF conversion
+   - Create a desktop shortcut and launch the application
 
-2. If Python is not installed:
-   - The script will ask: "Download Python automatically (Y/N)?"
-   - Type Y and press Enter
-   - Python will be downloaded and set up automatically
-   - No manual installation needed!
+2. Requirements:
+   - x64 Windows 10 or later (ARM64 and 32-bit Windows are not supported)
+   - Windows PowerShell 5.1 and Windows tar.exe
+   - Internet access on first installation or repair
+   - Several GB of free disk space for the app, packages, and download cache
+   - The repository and configured source commit must be publicly accessible
+   - No administrator access or permanent system PATH changes are requested
 
-3. If automatic download doesn't work:
-   - Go to: https://www.python.org/downloads/
-   - Download and install Python 3.9 or later
-   - IMPORTANT: Check "Add Python to PATH" during installation
-   - Restart your computer
-   - Run run_app.bat again
+3. After installation:
+   - Use the desktop shortcut or double-click this batch file again
+   - Normal launches reuse the installation without downloading it again
+   - Keep the console window open while the application is running
+   - Installation location: %LOCALAPPDATA%\BignanManchaOMR
+   - Setup/application logs: setup-*.log in that installation folder
+   - For verification only: run_app.bat --check
+   - To retry setup and reinstall requirements: run_app.bat --repair
+   - Repair preserves the previous source folder as an app-*-backup-* folder
+   - Keep scans/results outside the installation folder, including backups
+   - Downloads may take a long time; no fixed installation time is promised
 
 ================================================================================
 
 TO UNINSTALL:
 
-- Double-click "uninstall.bat"
-- Or run: run_app.bat --uninstall
+- Close the application, then run: run_app.bat --uninstall
+- Type REMOVE when prompted
 
 This will remove:
-- Virtual environment
-- Bundled Python (if auto-downloaded)
-- Temporary files
+- The managed application source, Python environment, and external tools
+- The managed download cache and logs
+- The desktop shortcut
 
-To completely remove, delete the entire folder after running uninstall.bat
+System Python/Tesseract/Poppler installations are not changed or removed.
+Files saved inside the managed installation folder are also removed.
+Keep your scanned documents and results outside the installation folder.
 
 ================================================================================
 
 For more detailed instructions, see:
-- QUICK_START_GUIDE.txt (detailed guide)
-- README_PORTABLE.txt (full documentation)
+- README.md (project overview; older setup guides may describe the old launcher)
 
 ================================================================================
 
